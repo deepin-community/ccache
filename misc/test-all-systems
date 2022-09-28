@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# While it's obviously quite impossible to support and test every single
+# distribution, this script enables easy checking of the most common standard
+# distributions at least.
+
+set -eu
+
+build_in_docker=$(dirname $0)/build-in-docker
+
+build() {
+    local name=$1
+    local cc=$2
+    local cxx=$3
+    local test_cc=$4
+    shift 4
+    echo "Build in Docker: $name CC=$cc CXX=$cxx TEST_CC=$test_cc CMAKE_PARAMS=\"$*\""
+    ASM=$cc CC=$cc CXX=$cxx TEST_CC=$test_cc CMAKE_PARAMS="$*" $build_in_docker $name
+}
+
+#     NAME         CC    CXX     TEST_CC CMAKE_PARAMS
+
+build debian-10    gcc   g++     gcc
+build debian-10    clang clang++ clang
+
+build debian-11    gcc   g++     gcc
+build debian-11    clang clang++ clang
+
+build ubuntu-18.04 gcc   g++     gcc
+build ubuntu-18.04 clang clang++ clang
+
+build ubuntu-20.04 gcc   g++     gcc
+build ubuntu-20.04 clang clang++ clang
+
+build centos-7     gcc   g++     gcc     -DWARNINGS_AS_ERRORS=false -DREDIS_STORAGE_BACKEND=OFF
+build centos-7     gcc   g++     clang   -DWARNINGS_AS_ERRORS=false -DREDIS_STORAGE_BACKEND=OFF
+
+build centos-8     gcc   g++     gcc
+build centos-8     clang clang++ clang
+
+build fedora-32    gcc   g++     gcc
+build fedora-32    clang clang++ clang
+
+build alpine-3.8   gcc   g++     gcc
+build alpine-3.8   gcc   g++     clang
+
+build alpine-3.14  gcc   g++     gcc
+build alpine-3.14  clang clang++ clang

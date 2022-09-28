@@ -1,0 +1,32 @@
+Description: Update manual page with Debian-specific instructions
+Author: Joel Rosdahl <joel@debian.org>
+Forwarded: not-needed
+
+Index: ccache/doc/MANUAL.adoc
+===================================================================
+--- ccache.orig/doc/MANUAL.adoc	2021-08-20 08:31:00.795877280 +0200
++++ ccache/doc/MANUAL.adoc	2021-08-20 08:31:04.703813172 +0200
+@@ -38,14 +38,17 @@
+ 
+ To use the first method, just make sure that `ccache` is in your `PATH`.
+ 
+-To use the symlinks method, do something like this:
++To use the second method on a Debian system, it's easiest to just prepend
++`/usr/lib/ccache` to your `PATH`. `/usr/lib/ccache` contains symlinks for all
++compilers currently installed as Debian packages.
++
++Alternatively, you can create any symlinks you like yourself like this:
+ 
+ -------------------------------------------------------------------------------
+-cp ccache /usr/local/bin/
+-ln -s ccache /usr/local/bin/gcc
+-ln -s ccache /usr/local/bin/g++
+-ln -s ccache /usr/local/bin/cc
+-ln -s ccache /usr/local/bin/c++
++ln -s /usr/bin/ccache /usr/local/bin/gcc
++ln -s /usr/bin/ccache /usr/local/bin/g++
++ln -s /usr/bin/ccache /usr/local/bin/cc
++ln -s /usr/bin/ccache /usr/local/bin/c++
+ -------------------------------------------------------------------------------
+ 
+ And so forth. This will work as long as the directory with symlinks comes
