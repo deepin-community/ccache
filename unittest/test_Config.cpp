@@ -1,4 +1,4 @@
-// Copyright (C) 2011-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2011-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -22,6 +22,7 @@
 #include "TestUtil.hpp"
 
 #include <core/exceptions.hpp>
+#include <util/file.hpp>
 
 #include "third_party/doctest.h"
 #include "third_party/fmt/core.h"
@@ -58,11 +59,12 @@ TEST_CASE("Config: default values")
   CHECK(config.hash_dir());
   CHECK(config.ignore_headers_in_manifest().empty());
   CHECK(config.ignore_options().empty());
+  CHECK(config.inode_cache());
   CHECK_FALSE(config.keep_comments_cpp());
-  CHECK(config.limit_multiple() == Approx(0.8));
   CHECK(config.log_file().empty());
   CHECK(config.max_files() == 0);
-  CHECK(config.max_size() == static_cast<uint64_t>(5) * 1000 * 1000 * 1000);
+  CHECK(config.max_size() == static_cast<uint64_t>(5) * 1024 * 1024 * 1024);
+  CHECK(config.msvc_dep_prefix() == "Note: including file:");
   CHECK(config.path().empty());
   CHECK_FALSE(config.pch_external_checksum());
   CHECK(config.prefix_command().empty());
@@ -70,12 +72,14 @@ TEST_CASE("Config: default values")
   CHECK_FALSE(config.read_only());
   CHECK_FALSE(config.read_only_direct());
   CHECK_FALSE(config.recache());
+  CHECK_FALSE(config.remote_only());
+  CHECK(config.remote_storage().empty());
   CHECK_FALSE(config.reshare());
   CHECK(config.run_second_cpp());
   CHECK(config.sloppiness().to_bitmask() == 0);
   CHECK(config.stats());
   CHECK(config.temporary_dir().empty()); // Set later
-  CHECK(config.umask() == nonstd::nullopt);
+  CHECK(config.umask() == std::nullopt);
 }
 
 TEST_CASE("Config::update_from_file")
@@ -91,7 +95,7 @@ TEST_CASE("Config::update_from_file")
   std::string base_dir = FMT("C:/{0}/foo/{0}", user);
 #endif
 
-  Util::write_file(
+  util::write_file(
     "ccache.conf",
     "base_dir = " + base_dir + "\n"
     "cache_dir=\n"
@@ -101,7 +105,7 @@ TEST_CASE("Config::update_from_file")
     "  #A comment\n"
     "\t compiler = foo\n"
     "compiler_check = none\n"
-    "compiler_type = pump\n"
+    "compiler_type = nvcc\n"
     "compression=false\n"
     "compression_level= 2\n"
     "cpp_extension = .foo\n"
@@ -115,10 +119,10 @@ TEST_CASE("Config::update_from_file")
     "ignore_headers_in_manifest = a:b/c\n"
     "ignore_options = -a=* -b\n"
     "keep_comments_cpp = true\n"
-    "limit_multiple = 1.0\n"
     "log_file = $USER${USER} \n"
     "max_files = 17\n"
     "max_size = 123M\n"
+    "msvc_dep_prefix = Some other prefix:\n"
     "path = $USER.x\n"
     "pch_external_checksum = true\n"
     "prefix_command = x$USER\n"
@@ -130,7 +134,8 @@ TEST_CASE("Config::update_from_file")
     "run_second_cpp = false\n"
     "sloppiness =     time_macros   ,include_file_mtime"
     "  include_file_ctime,file_stat_matches,file_stat_matches_ctime,pch_defines"
-    " ,  no_system_headers,system_headers,clang_index_store,ivfsoverlay\n"
+    " ,  no_system_headers,system_headers,clang_index_store,ivfsoverlay,"
+    " gcno_cwd,\n"
     "stats = false\n"
     "temporary_dir = ${USER}_foo\n"
     "umask = 777"); // Note: no newline.
@@ -141,7 +146,7 @@ TEST_CASE("Config::update_from_file")
   CHECK(config.cache_dir() == FMT("{0}$/{0}/.ccache", user));
   CHECK(config.compiler() == "foo");
   CHECK(config.compiler_check() == "none");
-  CHECK(config.compiler_type() == CompilerType::pump);
+  CHECK(config.compiler_type() == CompilerType::nvcc);
   CHECK_FALSE(config.compression());
   CHECK(config.compression_level() == 2);
   CHECK(config.cpp_extension() == ".foo");
@@ -155,10 +160,10 @@ TEST_CASE("Config::update_from_file")
   CHECK(config.ignore_headers_in_manifest() == "a:b/c");
   CHECK(config.ignore_options() == "-a=* -b");
   CHECK(config.keep_comments_cpp());
-  CHECK(config.limit_multiple() == Approx(1.0));
   CHECK(config.log_file() == FMT("{0}{0}", user));
   CHECK(config.max_files() == 17);
   CHECK(config.max_size() == 123 * 1000 * 1000);
+  CHECK(config.msvc_dep_prefix() == "Some other prefix:");
   CHECK(config.path() == FMT("{}.x", user));
   CHECK(config.pch_external_checksum());
   CHECK(config.prefix_command() == FMT("x{}", user));
@@ -169,18 +174,19 @@ TEST_CASE("Config::update_from_file")
   CHECK(config.reshare());
   CHECK_FALSE(config.run_second_cpp());
   CHECK(config.sloppiness().to_bitmask()
-        == (static_cast<uint32_t>(core::Sloppy::include_file_mtime)
-            | static_cast<uint32_t>(core::Sloppy::include_file_ctime)
-            | static_cast<uint32_t>(core::Sloppy::time_macros)
+        == (static_cast<uint32_t>(core::Sloppy::clang_index_store)
             | static_cast<uint32_t>(core::Sloppy::file_stat_matches)
             | static_cast<uint32_t>(core::Sloppy::file_stat_matches_ctime)
-            | static_cast<uint32_t>(core::Sloppy::system_headers)
+            | static_cast<uint32_t>(core::Sloppy::gcno_cwd)
+            | static_cast<uint32_t>(core::Sloppy::include_file_ctime)
+            | static_cast<uint32_t>(core::Sloppy::include_file_mtime)
+            | static_cast<uint32_t>(core::Sloppy::ivfsoverlay)
             | static_cast<uint32_t>(core::Sloppy::pch_defines)
-            | static_cast<uint32_t>(core::Sloppy::clang_index_store)
-            | static_cast<uint32_t>(core::Sloppy::ivfsoverlay)));
+            | static_cast<uint32_t>(core::Sloppy::system_headers)
+            | static_cast<uint32_t>(core::Sloppy::time_macros)));
   CHECK_FALSE(config.stats());
   CHECK(config.temporary_dir() == FMT("{}_foo", user));
-  CHECK(config.umask() == 0777u);
+  CHECK(config.umask() == 0777U);
 }
 
 TEST_CASE("Config::update_from_file, error handling")
@@ -191,31 +197,31 @@ TEST_CASE("Config::update_from_file, error handling")
 
   SUBCASE("missing equal sign")
   {
-    Util::write_file("ccache.conf", "no equal sign");
+    util::write_file("ccache.conf", "no equal sign");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: missing equal sign");
   }
 
   SUBCASE("unknown key")
   {
-    Util::write_file("ccache.conf", "# Comment\nfoo = bar");
+    util::write_file("ccache.conf", "# Comment\nfoo = bar");
     CHECK(config.update_from_file("ccache.conf"));
   }
 
   SUBCASE("invalid bool")
   {
-    Util::write_file("ccache.conf", "disable=");
+    util::write_file("ccache.conf", "disable=");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: not a boolean value: \"\"");
 
-    Util::write_file("ccache.conf", "disable=foo");
+    util::write_file("ccache.conf", "disable=foo");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: not a boolean value: \"foo\"");
   }
 
   SUBCASE("invalid variable reference")
   {
-    Util::write_file("ccache.conf", "base_dir = ${foo");
+    util::write_file("ccache.conf", "base_dir = ${foo");
     REQUIRE_THROWS_WITH(
       config.update_from_file("ccache.conf"),
       "ccache.conf:1: syntax error: missing '}' after \"foo\"");
@@ -224,14 +230,14 @@ TEST_CASE("Config::update_from_file, error handling")
 
   SUBCASE("empty umask")
   {
-    Util::write_file("ccache.conf", "umask = ");
+    util::write_file("ccache.conf", "umask = ");
     CHECK(config.update_from_file("ccache.conf"));
-    CHECK(config.umask() == nonstd::nullopt);
+    CHECK(config.umask() == std::nullopt);
   }
 
   SUBCASE("invalid size")
   {
-    Util::write_file("ccache.conf", "max_size = foo");
+    util::write_file("ccache.conf", "max_size = foo");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: invalid size: \"foo\"");
     // Other cases tested in test_Util.c.
@@ -239,7 +245,7 @@ TEST_CASE("Config::update_from_file, error handling")
 
   SUBCASE("unknown sloppiness")
   {
-    Util::write_file("ccache.conf", "sloppiness = time_macros, foo");
+    util::write_file("ccache.conf", "sloppiness = time_macros, foo");
     CHECK(config.update_from_file("ccache.conf"));
     CHECK(config.sloppiness().to_bitmask()
           == static_cast<uint32_t>(core::Sloppy::time_macros));
@@ -247,15 +253,15 @@ TEST_CASE("Config::update_from_file, error handling")
 
   SUBCASE("invalid unsigned")
   {
-    Util::write_file("ccache.conf", "max_files =");
+    util::write_file("ccache.conf", "max_files =");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: invalid unsigned integer: \"\"");
 
-    Util::write_file("ccache.conf", "max_files = -42");
+    util::write_file("ccache.conf", "max_files = -42");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: invalid unsigned integer: \"-42\"");
 
-    Util::write_file("ccache.conf", "max_files = foo");
+    util::write_file("ccache.conf", "max_files = foo");
     REQUIRE_THROWS_WITH(config.update_from_file("ccache.conf"),
                         "ccache.conf:1: invalid unsigned integer: \"foo\"");
   }
@@ -267,12 +273,12 @@ TEST_CASE("Config::update_from_file, error handling")
 
   SUBCASE("relative base dir")
   {
-    Util::write_file("ccache.conf", "base_dir = relative/path");
+    util::write_file("ccache.conf", "base_dir = relative/path");
     REQUIRE_THROWS_WITH(
       config.update_from_file("ccache.conf"),
       "ccache.conf:1: not an absolute path: \"relative/path\"");
 
-    Util::write_file("ccache.conf", "base_dir =");
+    util::write_file("ccache.conf", "base_dir =");
     CHECK(config.update_from_file("ccache.conf"));
   }
 }
@@ -299,23 +305,23 @@ TEST_CASE("Config::set_value_in_file")
 
   SUBCASE("set new value")
   {
-    Util::write_file("ccache.conf", "path = vanilla\n");
+    util::write_file("ccache.conf", "path = vanilla\n");
     config.set_value_in_file("ccache.conf", "compiler", "chocolate");
-    std::string content = Util::read_file("ccache.conf");
+    std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "path = vanilla\ncompiler = chocolate\n");
   }
 
   SUBCASE("existing value")
   {
-    Util::write_file("ccache.conf", "path = chocolate\nstats = chocolate\n");
+    util::write_file("ccache.conf", "path = chocolate\nstats = chocolate\n");
     config.set_value_in_file("ccache.conf", "path", "vanilla");
-    std::string content = Util::read_file("ccache.conf");
+    std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "path = vanilla\nstats = chocolate\n");
   }
 
   SUBCASE("unknown option")
   {
-    Util::write_file("ccache.conf", "path = chocolate\nstats = chocolate\n");
+    util::write_file("ccache.conf", "path = chocolate\nstats = chocolate\n");
     try {
       config.set_value_in_file("ccache.conf", "foo", "bar");
       CHECK(false);
@@ -323,24 +329,24 @@ TEST_CASE("Config::set_value_in_file")
       CHECK(std::string(e.what()) == "unknown configuration option \"foo\"");
     }
 
-    std::string content = Util::read_file("ccache.conf");
+    std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "path = chocolate\nstats = chocolate\n");
   }
 
   SUBCASE("unknown sloppiness")
   {
-    Util::write_file("ccache.conf", "path = vanilla\n");
+    util::write_file("ccache.conf", "path = vanilla\n");
     config.set_value_in_file("ccache.conf", "sloppiness", "foo");
-    std::string content = Util::read_file("ccache.conf");
+    std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "path = vanilla\nsloppiness = foo\n");
   }
 
   SUBCASE("comments are kept")
   {
-    Util::write_file("ccache.conf", "# c1\npath = blueberry\n#c2\n");
+    util::write_file("ccache.conf", "# c1\npath = blueberry\n#c2\n");
     config.set_value_in_file("ccache.conf", "path", "vanilla");
     config.set_value_in_file("ccache.conf", "compiler", "chocolate");
-    std::string content = Util::read_file("ccache.conf");
+    std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "# c1\npath = vanilla\n#c2\ncompiler = chocolate\n");
   }
 }
@@ -370,7 +376,7 @@ TEST_CASE("Config::visit_items")
 {
   TestContext test_context;
 
-  Util::write_file(
+  util::write_file(
     "test.conf",
     "absolute_paths_in_stderr = true\n"
 #ifndef _WIN32
@@ -398,10 +404,10 @@ TEST_CASE("Config::visit_items")
     "ignore_options = -a=* -b\n"
     "inode_cache = false\n"
     "keep_comments_cpp = true\n"
-    "limit_multiple = 0.0\n"
     "log_file = lf\n"
     "max_files = 4711\n"
     "max_size = 98.7M\n"
+    "msvc_dep_prefix = mdp\n"
     "namespace = ns\n"
     "path = p\n"
     "pch_external_checksum = true\n"
@@ -410,12 +416,13 @@ TEST_CASE("Config::visit_items")
     "read_only = true\n"
     "read_only_direct = true\n"
     "recache = true\n"
+    "remote_only = true\n"
+    "remote_storage = rs\n"
     "reshare = true\n"
     "run_second_cpp = false\n"
-    "secondary_storage = ss\n"
     "sloppiness = include_file_mtime, include_file_ctime, time_macros,"
     " file_stat_matches, file_stat_matches_ctime, pch_defines, system_headers,"
-    " clang_index_store, ivfsoverlay\n"
+    " clang_index_store, ivfsoverlay, gcno_cwd \n"
     "stats = false\n"
     "stats_log = sl\n"
     "temporary_dir = td\n"
@@ -458,10 +465,10 @@ TEST_CASE("Config::visit_items")
     "(test.conf) ignore_options = -a=* -b",
     "(test.conf) inode_cache = false",
     "(test.conf) keep_comments_cpp = true",
-    "(test.conf) limit_multiple = 0.0",
     "(test.conf) log_file = lf",
     "(test.conf) max_files = 4711",
-    "(test.conf) max_size = 98.7M",
+    "(test.conf) max_size = 98.7 MB",
+    "(test.conf) msvc_dep_prefix = mdp",
     "(test.conf) namespace = ns",
     "(test.conf) path = p",
     "(test.conf) pch_external_checksum = true",
@@ -470,12 +477,14 @@ TEST_CASE("Config::visit_items")
     "(test.conf) read_only = true",
     "(test.conf) read_only_direct = true",
     "(test.conf) recache = true",
+    "(test.conf) remote_only = true",
+    "(test.conf) remote_storage = rs",
     "(test.conf) reshare = true",
     "(test.conf) run_second_cpp = false",
-    "(test.conf) secondary_storage = ss",
-    "(test.conf) sloppiness = include_file_mtime, include_file_ctime,"
-    " time_macros, pch_defines, file_stat_matches, file_stat_matches_ctime,"
-    " system_headers, clang_index_store, ivfsoverlay",
+    "(test.conf) sloppiness = clang_index_store, file_stat_matches,"
+    " file_stat_matches_ctime, gcno_cwd, include_file_ctime,"
+    " include_file_mtime, ivfsoverlay, pch_defines, system_headers,"
+    " time_macros",
     "(test.conf) stats = false",
     "(test.conf) stats_log = sl",
     "(test.conf) temporary_dir = td",

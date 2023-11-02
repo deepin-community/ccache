@@ -34,24 +34,22 @@ endmacro()
 
 set(
   _clang_gcc_warnings
+  -Wcast-align
+  -Wdouble-promotion
   -Wextra
   -Wnon-virtual-dtor
-  -Wcast-align
-  -Wunused
+  -Wnull-dereference
   -Woverloaded-virtual
   -Wpedantic
+  -Wshadow
+  -Wunused
 
   # Candidates for enabling in the future:
-  # -Wshadow
   # -Wold-style-cast
   # -Wconversion
   # -Wsign-conversion
-  # -Wnull-dereference
   # -Wformat=2
 )
-
-# Tested separately as this is not supported by Clang 3.4.
-add_compile_flag_if_supported(_clang_gcc_warnings "-Wdouble-promotion")
 
 if(WARNINGS_AS_ERRORS)
   list(APPEND _clang_gcc_warnings -Werror)
@@ -76,6 +74,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 
   # Disable C++20 compatibility for now.
   add_compile_flag_if_supported(CCACHE_COMPILER_WARNINGS "-Wno-c++2a-compat")
+  add_compile_flag_if_supported(CCACHE_COMPILER_WARNINGS "-Wno-c99-extensions")
+  add_compile_flag_if_supported(CCACHE_COMPILER_WARNINGS "-Wno-language-extension-token")
 
   # If compiler supports these warnings they have to be disabled for now.
   add_compile_flag_if_supported(
@@ -97,15 +97,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # -Wduplicated-branches
     # -Wuseless-cast
   )
-
-  # TODO: Exact version or reason unknown, discovered in Ubuntu 14 Docker test
-  # with GCC 4.8.4
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8.5)
-    add_compile_flag_if_supported(
-      CCACHE_COMPILER_WARNINGS "-Wno-missing-field-initializers")
-    add_compile_flag_if_supported(
-      CCACHE_COMPILER_WARNINGS "-Wno-unused-variable")
-  endif()
 elseif(MSVC)
   # Remove any warning level flags added by CMake.
   string(REGEX REPLACE "/W[0-4]" "" CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}")

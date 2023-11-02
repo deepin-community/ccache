@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,19 +19,30 @@
 #pragma once
 
 #include "NonCopyable.hpp"
-#include "Util.hpp"
 
 #include <core/Sloppiness.hpp>
+#include <util/string.hpp>
 
-#include "third_party/nonstd/optional.hpp"
+#include <sys/types.h>
 
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
-enum class CompilerType { auto_guess, clang, gcc, nvcc, other, pump };
+enum class CompilerType {
+  auto_guess,
+  clang,
+  clang_cl,
+  gcc,
+  icl,
+  msvc,
+  nvcc,
+  other
+};
 
 std::string compiler_type_to_string(CompilerType compiler_type);
 
@@ -40,7 +51,7 @@ class Config : NonCopyable
 public:
   Config() = default;
 
-  void read();
+  void read(const std::vector<std::string>& cmdline_config_settings = {});
 
   bool absolute_paths_in_stderr() const;
   const std::string& base_dir() const;
@@ -64,10 +75,10 @@ public:
   const std::string& ignore_options() const;
   bool inode_cache() const;
   bool keep_comments_cpp() const;
-  double limit_multiple() const;
   const std::string& log_file() const;
   uint64_t max_files() const;
   uint64_t max_size() const;
+  const std::string& msvc_dep_prefix() const;
   const std::string& path() const;
   bool pch_external_checksum() const;
   const std::string& prefix_command() const;
@@ -75,15 +86,25 @@ public:
   bool read_only() const;
   bool read_only_direct() const;
   bool recache() const;
+  bool remote_only() const;
+  const std::string& remote_storage() const;
   bool reshare() const;
   bool run_second_cpp() const;
-  const std::string& secondary_storage() const;
   core::Sloppiness sloppiness() const;
   bool stats() const;
   const std::string& stats_log() const;
   const std::string& namespace_() const;
   const std::string& temporary_dir() const;
-  nonstd::optional<mode_t> umask() const;
+  std::optional<mode_t> umask() const;
+
+  // Return true for Clang and clang-cl.
+  bool is_compiler_group_clang() const;
+
+  // Return true for MSVC (cl.exe), clang-cl, and icl.
+  bool is_compiler_group_msvc() const;
+
+  util::SizeUnitPrefixType size_unit_prefix_type() const;
+  std::string default_temporary_dir() const;
 
   void set_base_dir(const std::string& value);
   void set_cache_dir(const std::string& value);
@@ -98,16 +119,17 @@ public:
   void set_ignore_options(const std::string& value);
   void set_inode_cache(bool value);
   void set_max_files(uint64_t value);
-  void set_max_size(uint64_t value);
+  void set_msvc_dep_prefix(const std::string& value);
   void set_run_second_cpp(bool value);
+  void set_temporary_dir(const std::string& value);
 
   // Where to write configuration changes.
-  const std::string& primary_config_path() const;
-  // Secondary, read-only configuration file (if any).
-  const std::string& secondary_config_path() const;
+  const std::string& config_path() const;
+  // System (read-only) configuration file (if any).
+  const std::string& system_config_path() const;
 
-  void set_primary_config_path(std::string path);
-  void set_secondary_config_path(std::string path);
+  void set_config_path(std::string path);
+  void set_system_config_path(std::string path);
 
   using ItemVisitor = std::function<void(const std::string& key,
                                          const std::string& value,
@@ -118,6 +140,11 @@ public:
   // Returns false if the file can't be opened, otherwise true. Throws Error on
   // invalid configuration values.
   bool update_from_file(const std::string& path);
+
+  // Set config values from a map with key-value pairs.
+  //
+  // Throws Error on invalid configuration values.
+  void update_from_map(const std::unordered_map<std::string, std::string>& map);
 
   // Set config values from environment variables.
   //
@@ -137,8 +164,8 @@ public:
   static void check_key_tables_consistency();
 
 private:
-  std::string m_primary_config_path;
-  std::string m_secondary_config_path;
+  std::string m_config_path;
+  std::string m_system_config_path;
 
   bool m_absolute_paths_in_stderr = false;
   std::string m_base_dir;
@@ -160,12 +187,12 @@ private:
   bool m_hash_dir = true;
   std::string m_ignore_headers_in_manifest;
   std::string m_ignore_options;
-  bool m_inode_cache = false;
+  bool m_inode_cache = true;
   bool m_keep_comments_cpp = false;
-  double m_limit_multiple = 0.8;
   std::string m_log_file;
   uint64_t m_max_files = 0;
-  uint64_t m_max_size = 5ULL * 1000 * 1000 * 1000;
+  uint64_t m_max_size = 5ULL * 1024 * 1024 * 1024;
+  std::string m_msvc_dep_prefix = "Note: including file:";
   std::string m_path;
   bool m_pch_external_checksum = false;
   std::string m_prefix_command;
@@ -175,25 +202,26 @@ private:
   bool m_recache = false;
   bool m_reshare = false;
   bool m_run_second_cpp = true;
-  std::string m_secondary_storage;
+  bool m_remote_only = false;
+  std::string m_remote_storage;
   core::Sloppiness m_sloppiness;
   bool m_stats = true;
   std::string m_stats_log;
   std::string m_namespace;
   std::string m_temporary_dir;
-  nonstd::optional<mode_t> m_umask;
+  std::optional<mode_t> m_umask;
 
   bool m_temporary_dir_configured_explicitly = false;
+  util::SizeUnitPrefixType m_size_prefix_type =
+    util::SizeUnitPrefixType::binary;
 
   std::unordered_map<std::string /*key*/, std::string /*origin*/> m_origins;
 
   void set_item(const std::string& key,
                 const std::string& value,
-                const nonstd::optional<std::string>& env_var_key,
+                const std::optional<std::string>& env_var_key,
                 bool negate,
                 const std::string& origin);
-
-  static std::string default_temporary_dir(const std::string& cache_dir);
 };
 
 inline bool
@@ -230,6 +258,21 @@ inline CompilerType
 Config::compiler_type() const
 {
   return m_compiler_type;
+}
+
+inline bool
+Config::is_compiler_group_clang() const
+{
+  return m_compiler_type == CompilerType::clang
+         || m_compiler_type == CompilerType::clang_cl;
+}
+
+inline bool
+Config::is_compiler_group_msvc() const
+{
+  return m_compiler_type == CompilerType::msvc
+         || m_compiler_type == CompilerType::clang_cl
+         || m_compiler_type == CompilerType::icl;
 }
 
 inline bool
@@ -328,12 +371,6 @@ Config::keep_comments_cpp() const
   return m_keep_comments_cpp;
 }
 
-inline double
-Config::limit_multiple() const
-{
-  return m_limit_multiple;
-}
-
 inline const std::string&
 Config::log_file() const
 {
@@ -350,6 +387,12 @@ inline uint64_t
 Config::max_size() const
 {
   return m_max_size;
+}
+
+inline const std::string&
+Config::msvc_dep_prefix() const
+{
+  return m_msvc_dep_prefix;
 }
 
 inline const std::string&
@@ -406,10 +449,16 @@ Config::run_second_cpp() const
   return m_run_second_cpp;
 }
 
-inline const std::string&
-Config::secondary_storage() const
+inline bool
+Config::remote_only() const
 {
-  return m_secondary_storage;
+  return m_remote_only;
+}
+
+inline const std::string&
+Config::remote_storage() const
+{
+  return m_remote_storage;
 }
 
 inline core::Sloppiness
@@ -442,10 +491,16 @@ Config::temporary_dir() const
   return m_temporary_dir;
 }
 
-inline nonstd::optional<mode_t>
+inline std::optional<mode_t>
 Config::umask() const
 {
   return m_umask;
+}
+
+inline util::SizeUnitPrefixType
+Config::size_unit_prefix_type() const
+{
+  return m_size_prefix_type;
 }
 
 inline void
@@ -459,7 +514,7 @@ Config::set_cache_dir(const std::string& value)
 {
   m_cache_dir = value;
   if (!m_temporary_dir_configured_explicitly) {
-    m_temporary_dir = default_temporary_dir(m_cache_dir);
+    m_temporary_dir = default_temporary_dir();
   }
 }
 
@@ -530,13 +585,19 @@ Config::set_max_files(uint64_t value)
 }
 
 inline void
-Config::set_max_size(uint64_t value)
+Config::set_msvc_dep_prefix(const std::string& value)
 {
-  m_max_size = value;
+  m_msvc_dep_prefix = value;
 }
 
 inline void
 Config::set_run_second_cpp(bool value)
 {
   m_run_second_cpp = value;
+}
+
+inline void
+Config::set_temporary_dir(const std::string& value)
+{
+  m_temporary_dir = value;
 }

@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -22,7 +22,7 @@
 
 #include <core/Statistic.hpp>
 
-#include "third_party/nonstd/optional.hpp"
+#include <optional>
 
 class Context;
 
@@ -31,11 +31,12 @@ struct ProcessArgsResult
   ProcessArgsResult(core::Statistic error_);
   ProcessArgsResult(const Args& preprocessor_args_,
                     const Args& extra_args_to_hash_,
-                    const Args& compiler_args_);
+                    const Args& compiler_args_,
+                    bool hash_actual_cwd_);
 
   // nullopt on success, otherwise the statistics counter that should be
   // incremented.
-  nonstd::optional<core::Statistic> error;
+  std::optional<core::Statistic> error;
 
   // Arguments (except -E) to send to the preprocessor.
   Args preprocessor_args;
@@ -45,6 +46,9 @@ struct ProcessArgsResult
 
   // Arguments to send to the real compiler.
   Args compiler_args;
+
+  // Whether to include the actual CWD in the hash.
+  bool hash_actual_cwd;
 };
 
 inline ProcessArgsResult::ProcessArgsResult(core::Statistic error_)
@@ -54,10 +58,12 @@ inline ProcessArgsResult::ProcessArgsResult(core::Statistic error_)
 
 inline ProcessArgsResult::ProcessArgsResult(const Args& preprocessor_args_,
                                             const Args& extra_args_to_hash_,
-                                            const Args& compiler_args_)
+                                            const Args& compiler_args_,
+                                            bool hash_actual_cwd_)
   : preprocessor_args(preprocessor_args_),
     extra_args_to_hash(extra_args_to_hash_),
-    compiler_args(compiler_args_)
+    compiler_args(compiler_args_),
+    hash_actual_cwd(hash_actual_cwd_)
 {
 }
 

@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 
-project(ccache LANGUAGES C CXX)
+project(ccache LANGUAGES C CXX ASM ASM_MASM)
 if(MSVC)
   enable_language(ASM_MASM)
 else()
@@ -8,11 +8,7 @@ else()
 endif()
 set(CMAKE_PROJECT_DESCRIPTION "a fast C/C++ compiler cache")
 
-if(MSVC)
-  set(CMAKE_CXX_STANDARD 17) # Need support for std::filesystem
-else()
-  set(CMAKE_CXX_STANDARD 14)
-endif()
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
 
@@ -70,39 +66,64 @@ if(ENABLE_IPO AND NOT MINGW)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
-include(UseCcache)
+include(CIBuildType)
+include(DefaultBuildType)
 include(UseFastestLinker)
 include(StandardSettings)
 include(StandardWarnings)
-include(CIBuildType)
-include(DefaultBuildType)
 
 #
 # Configuration
 #
-include(GNUInstallDirs)
+
+include(InstallDirs)
 include(GenerateConfigurationFile)
 include(GenerateVersionFile)
 
 #
-# Third party
+# Static link configuration
 #
-set(HIREDIS_FROM_INTERNET_DEFAULT OFF)
-set(ZSTD_FROM_INTERNET_DEFAULT OFF)
 
-# Default to downloading deps for Visual Studio, unless using a package manager.
-if(MSVC AND NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg|conan")
-  set(HIREDIS_FROM_INTERNET_DEFAULT ON)
-  set(ZSTD_FROM_INTERNET_DEFAULT ON)
+set(STATIC_LINK_DEFAULT OFF)
+if(WIN32)
+  set(STATIC_LINK_DEFAULT ON)
 endif()
 
-option(ZSTD_FROM_INTERNET "Download and use libzstd from the Internet" ${ZSTD_FROM_INTERNET_DEFAULT})
-find_package(zstd 1.1.2 REQUIRED)
+option(STATIC_LINK "Prefer linking libraries statically" ${STATIC_LINK_DEFAULT})
 
-option(REDIS_STORAGE_BACKEND "Enable Redis secondary storage" ON)
+if(STATIC_LINK)
+  list(INSERT CMAKE_FIND_LIBRARY_SUFFIXES 0 "${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  set(CMAKE_LINK_SEARCH_START_STATIC ON)
+
+  # Link MSVC runtime statically.
+  if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  # Link MINGW runtime statically.
+  elseif(WIN32)
+    if((CMAKE_CXX_COMPILER_ID STREQUAL GNU) OR (CMAKE_CXX_COMPILER_ID STREQUAL Clang))
+      list(APPEND CCACHE_EXTRA_LIBS -static-libgcc -static-libstdc++ -static -lwinpthread -dynamic)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL Clang)
+      list(APPEND CCACHE_EXTRA_LIBS -fuse-ld=lld)
+    endif()
+  endif()
+endif()
+
+#
+# Third party
+#
+set(ZSTD_FROM_INTERNET AUTO CACHE STRING "Download and use libzstd from the Internet")
+set_property(CACHE ZSTD_FROM_INTERNET PROPERTY STRINGS AUTO ON OFF)
+
+set(HIREDIS_FROM_INTERNET AUTO CACHE STRING "Download and use libhiredis from the Internet")
+set_property(CACHE HIREDIS_FROM_INTERNET PROPERTY STRINGS AUTO ON OFF)
+
+find_package(zstd 1.1.2 MODULE REQUIRED)
+
+option(REDIS_STORAGE_BACKEND "Enable Redis remote storage" ON)
+
 if(REDIS_STORAGE_BACKEND)
-  option(HIREDIS_FROM_INTERNET "Download and use libhiredis from the Internet" ${HIREDIS_FROM_INTERNET_DEFAULT})
-  find_package(hiredis 0.13.3 REQUIRED)
+  find_package(hiredis 0.13.3 MODULE REQUIRED)
 endif()
 
 #
@@ -113,10 +134,6 @@ endif()
 #
 include(CodeAnalysis)
 option(ENABLE_TRACING "Enable possibility to use internal ccache tracing" OFF)
-
-if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  option(STATIC_LINK "Link statically with system libraries" ON)
-endif()
 
 #
 # Source code

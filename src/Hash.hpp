@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -21,10 +21,11 @@
 #include "Digest.hpp"
 
 #include "third_party/blake3/blake3.h"
-#include "third_party/nonstd/string_view.hpp"
+#include <third_party/nonstd/expected.hpp>
 
 #include <cstdint>
 #include <cstdio>
+#include <string_view>
 
 // This class represents a hash state.
 class Hash
@@ -38,7 +39,7 @@ public:
   Hash& operator=(const Hash& other) = default;
 
   // Enable debug logging of the hashed input to a binary and a text file.
-  void enable_debug(nonstd::string_view section_name,
+  void enable_debug(std::string_view section_name,
                     FILE* debug_binary,
                     FILE* debug_text);
 
@@ -53,7 +54,7 @@ public:
   //   conditional hashing of information in a safe way (e.g., if we want to
   //   hash information X if CCACHE_A is set and information Y if CCACHE_B is
   //   set, there should never be a hash collision risk).
-  Hash& hash_delimiter(nonstd::string_view type);
+  Hash& hash_delimiter(std::string_view type);
 
   // Add bytes to the hash.
   //
@@ -72,7 +73,7 @@ public:
   //
   // If hash debugging is enabled, the string is written to the text input file
   // followed by a newline.
-  Hash& hash(nonstd::string_view data);
+  Hash& hash(std::string_view data);
 
   // Add an integer to the hash.
   //
@@ -80,27 +81,25 @@ public:
   // text input file followed by a newline.
   Hash& hash(int64_t x);
 
-  // Add contents read from an open file descriptor to the hash.
-  //
-  // If hash debugging is enabled, the data is written verbatim to the text
-  // input file.
-  //
-  // Returns true on success, otherwise false.
-  bool hash_fd(int fd);
-
   // Add file contents to the hash.
   //
   // If hash debugging is enabled, the data is written verbatim to the text
   // input file.
+  nonstd::expected<void, std::string> hash_file(const std::string& path);
+
+  // Add contents read from an open file descriptor to the hash.
   //
-  // Returns true on success, otherwise false.
-  bool hash_file(const std::string& path);
+  // If hash debugging is enabled, the data is written verbatim to the text
+  // input file.
+  nonstd::expected<void, std::string> hash_fd(int fd);
+
+  // Add `text` to the text debug file.
+  void add_debug_text(std::string_view text);
 
 private:
   blake3_hasher m_hasher;
   FILE* m_debug_binary = nullptr;
   FILE* m_debug_text = nullptr;
 
-  void hash_buffer(nonstd::string_view buffer);
-  void add_debug_text(nonstd::string_view text);
+  void hash_buffer(std::string_view buffer);
 };

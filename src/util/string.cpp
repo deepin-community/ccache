@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -21,10 +21,38 @@
 #include <assertions.hpp>
 #include <fmtmacros.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <iostream>
 
 namespace util {
+
+std::string
+format_human_readable_diff(int64_t diff, SizeUnitPrefixType prefix_type)
+{
+  const char* sign = diff == 0 ? "" : (diff > 0 ? "+" : "-");
+  return FMT(
+    "{}{}", sign, format_human_readable_size(std::abs(diff), prefix_type));
+}
+
+std::string
+format_human_readable_size(uint64_t size, SizeUnitPrefixType prefix_type)
+{
+  const double factor = prefix_type == SizeUnitPrefixType::binary ? 1024 : 1000;
+  const char* infix = prefix_type == SizeUnitPrefixType::binary ? "i" : "";
+  if (size >= factor * factor * factor) {
+    return FMT("{:.1f} G{}B", size / (factor * factor * factor), infix);
+  } else if (size >= factor * factor) {
+    return FMT("{:.1f} M{}B", size / (factor * factor), infix);
+  } else if (size >= factor) {
+    const char* k = prefix_type == SizeUnitPrefixType::binary ? "K" : "k";
+    return FMT("{:.1f} {}{}B", size / factor, k, infix);
+  } else if (size == 1) {
+    return "1 byte";
+  } else {
+    return FMT("{} bytes", size);
+  }
+}
 
 nonstd::expected<double, std::string>
 parse_double(const std::string& value)
@@ -47,10 +75,10 @@ parse_double(const std::string& value)
 }
 
 nonstd::expected<int64_t, std::string>
-parse_signed(const std::string& value,
-             const nonstd::optional<int64_t> min_value,
-             const nonstd::optional<int64_t> max_value,
-             const nonstd::string_view description)
+parse_signed(std::string_view value,
+             const std::optional<int64_t> min_value,
+             const std::optional<int64_t> max_value,
+             const std::string_view description)
 {
   const std::string stripped_value = strip_whitespace(value);
 
@@ -78,17 +106,63 @@ parse_signed(const std::string& value,
   }
 }
 
+nonstd::expected<std::pair<uint64_t, SizeUnitPrefixType>, std::string>
+parse_size(const std::string& value)
+{
+  errno = 0;
+
+  char* p;
+  double result = strtod(value.c_str(), &p);
+  if (errno != 0 || result < 0 || p == value.c_str() || value.empty()) {
+    return nonstd::make_unexpected(FMT("invalid size: \"{}\"", value));
+  }
+
+  while (isspace(*p)) {
+    ++p;
+  }
+
+  SizeUnitPrefixType prefix_type;
+  if (*p != '\0') {
+    prefix_type = *(p + 1) == 'i' ? SizeUnitPrefixType::binary
+                                  : SizeUnitPrefixType::decimal;
+    unsigned multiplier =
+      prefix_type == SizeUnitPrefixType::binary ? 1024 : 1000;
+    switch (*p) {
+    case 'T':
+      result *= multiplier;
+      [[fallthrough]];
+    case 'G':
+      result *= multiplier;
+      [[fallthrough]];
+    case 'M':
+      result *= multiplier;
+      [[fallthrough]];
+    case 'K':
+    case 'k':
+      result *= multiplier;
+      break;
+    default:
+      return nonstd::make_unexpected(FMT("invalid size: \"{}\"", value));
+    }
+  } else {
+    result *= 1024 * 1024 * 1024;
+    prefix_type = SizeUnitPrefixType::binary;
+  }
+
+  return std::make_pair(static_cast<uint64_t>(result), prefix_type);
+}
+
 nonstd::expected<mode_t, std::string>
-parse_umask(const std::string& value)
+parse_umask(std::string_view value)
 {
   return util::parse_unsigned(value, 0, 0777, "umask", 8);
 }
 
 nonstd::expected<uint64_t, std::string>
-parse_unsigned(const std::string& value,
-               const nonstd::optional<uint64_t> min_value,
-               const nonstd::optional<uint64_t> max_value,
-               const nonstd::string_view description,
+parse_unsigned(std::string_view value,
+               const std::optional<uint64_t> min_value,
+               const std::optional<uint64_t> max_value,
+               const std::string_view description,
                const int base)
 {
   const std::string stripped_value = strip_whitespace(value);
@@ -124,7 +198,7 @@ parse_unsigned(const std::string& value,
 }
 
 nonstd::expected<std::string, std::string>
-percent_decode(nonstd::string_view string)
+percent_decode(std::string_view string)
 {
   const auto from_hex = [](const char digit) {
     return static_cast<uint8_t>(
@@ -133,7 +207,8 @@ percent_decode(nonstd::string_view string)
 
   std::string result;
   result.reserve(string.size());
-  for (size_t i = 0; i < string.size(); ++i) {
+  size_t i = 0;
+  while (i < string.size()) {
     if (string[i] != '%') {
       result += string[i];
     } else if (i + 2 >= string.size() || !std::isxdigit(string[i + 1])
@@ -146,15 +221,16 @@ percent_decode(nonstd::string_view string)
       result += ch;
       i += 2;
     }
+    ++i;
   }
 
   return result;
 }
 
 std::string
-replace_all(const nonstd::string_view string,
-            const nonstd::string_view from,
-            const nonstd::string_view to)
+replace_all(const std::string_view string,
+            const std::string_view from,
+            const std::string_view to)
 {
   if (from.empty()) {
     return std::string(string);
@@ -165,7 +241,7 @@ replace_all(const nonstd::string_view string,
   size_t right = 0;
   while (left < string.size()) {
     right = string.find(from, left);
-    if (right == nonstd::string_view::npos) {
+    if (right == std::string_view::npos) {
       result.append(string.data() + left);
       break;
     }
@@ -177,9 +253,9 @@ replace_all(const nonstd::string_view string,
 }
 
 std::string
-replace_first(const nonstd::string_view string,
-              const nonstd::string_view from,
-              const nonstd::string_view to)
+replace_first(const std::string_view string,
+              const std::string_view from,
+              const std::string_view to)
 {
   if (from.empty()) {
     return std::string(string);
@@ -187,7 +263,7 @@ replace_first(const nonstd::string_view string,
 
   std::string result;
   const auto pos = string.find(from);
-  if (pos != nonstd::string_view::npos) {
+  if (pos != std::string_view::npos) {
     result.append(string.data(), pos);
     result.append(to.data(), to.length());
     result.append(string.data() + pos + from.size());
@@ -197,12 +273,29 @@ replace_first(const nonstd::string_view string,
   return result;
 }
 
-std::pair<nonstd::string_view, nonstd::optional<nonstd::string_view>>
-split_once(const nonstd::string_view string, const char split_char)
+std::pair<std::string_view, std::optional<std::string_view>>
+split_once(const char* string, const char split_char)
+{
+  return split_once(std::string_view(string), split_char);
+}
+
+std::pair<std::string, std::optional<std::string>>
+split_once(std::string&& string, const char split_char)
+{
+  const auto [left, right] = split_once(std::string_view(string), split_char);
+  if (right) {
+    return std::make_pair(std::string(left), std::string(*right));
+  } else {
+    return std::make_pair(std::string(left), std::nullopt);
+  }
+}
+
+std::pair<std::string_view, std::optional<std::string_view>>
+split_once(const std::string_view string, const char split_char)
 {
   const size_t sep_pos = string.find(split_char);
-  if (sep_pos == nonstd::string_view::npos) {
-    return std::make_pair(string, nonstd::nullopt);
+  if (sep_pos == std::string_view::npos) {
+    return std::make_pair(string, std::nullopt);
   } else {
     return std::make_pair(string.substr(0, sep_pos),
                           string.substr(sep_pos + 1));
@@ -210,7 +303,7 @@ split_once(const nonstd::string_view string, const char split_char)
 }
 
 std::string
-strip_whitespace(const nonstd::string_view string)
+strip_whitespace(const std::string_view string)
 {
   const auto is_space = [](const int ch) { return std::isspace(ch); };
   const auto start = std::find_if_not(string.begin(), string.end(), is_space);

@@ -76,17 +76,11 @@
 // Define if your compiler supports AVX2.
 #cmakedefine HAVE_AVX2
 
-// Define if you have the "geteuid" function.
-#cmakedefine HAVE_GETEUID
-
 // Define if you have the "getopt_long" function.
 #cmakedefine HAVE_GETOPT_LONG
 
 // Define if you have the "getpwuid" function.
 #cmakedefine HAVE_GETPWUID
-
-// Define if you have the "gettimeofday" function.
-#cmakedefine HAVE_GETTIMEOFDAY
 
 // Define if you have the <linux/fs.h> header file.
 #cmakedefine HAVE_LINUX_FS_H
@@ -96,9 +90,6 @@
 
 // Define if you have the "posix_fallocate.
 #cmakedefine HAVE_POSIX_FALLOCATE
-
-// Define if you have the "pthread_mutexattr_setpshared" function.
-#cmakedefine HAVE_PTHREAD_MUTEXATTR_SETPSHARED
 
 // Define if you have the <pwd.h> header file.
 #cmakedefine HAVE_PWD_H
@@ -123,6 +114,15 @@
 
 // Define if "st_mtim" is a member of "struct stat".
 #cmakedefine HAVE_STRUCT_STAT_ST_MTIM
+
+// Define if "st_atimespec" is a member of "struct stat".
+#cmakedefine HAVE_STRUCT_STAT_ST_ATIMESPEC
+
+// Define if "st_ctimespec" is a member of "struct stat".
+#cmakedefine HAVE_STRUCT_STAT_ST_CTIMESPEC
+
+// Define if "st_mtimespec" is a member of "struct stat".
+#cmakedefine HAVE_STRUCT_STAT_ST_MTIMESPEC
 
 // Define if you have the "syslog" function.
 #cmakedefine HAVE_SYSLOG
@@ -172,11 +172,11 @@
 // Define if you have the "unsetenv" function.
 #cmakedefine HAVE_UNSETENV
 
+// Define if you have the "utimensat" function.
+#cmakedefine HAVE_UTIMENSAT
+
 // Define if you have the "utimes" function.
 #cmakedefine HAVE_UTIMES
-
-// Define if you have the "PTHREAD_MUTEX_ROBUST" constant.
-#cmakedefine HAVE_PTHREAD_MUTEX_ROBUST
 
 #if defined(__ibmxl__) && defined(__clang__) // Compiler xlclang
 #  undef HAVE_VARARGS_H // varargs.h would hide macros of stdarg.h
@@ -193,23 +193,20 @@ typedef int pid_t;
 #  endif // _MSC_VER
 #endif   // _WIN32
 
-// GCC version of a couple of standard C++ attributes.
-#ifdef __GNUC__
-#  define nodiscard gnu::warn_unused_result
-#  define maybe_unused gnu::unused
-#endif
-
 // O_BINARY is needed when reading binary data on Windows, so use it everywhere
 // with a compatibility define for Unix platforms.
 #if !defined(_WIN32) && !defined(O_BINARY)
 #  define O_BINARY 0
+#endif
+#if !defined(_WIN32) && !defined(O_TEXT)
+#  define O_TEXT 0
 #endif
 
 #ifndef ESTALE
 #  define ESTALE -1
 #endif
 
-#define SYSCONFDIR "@CMAKE_INSTALL_FULL_SYSCONFDIR@"
+#define SYSCONFDIR "@CONFIG_SYSCONFDIR_C_ESCAPED@"
 
 #cmakedefine INODE_CACHE_SUPPORTED
 

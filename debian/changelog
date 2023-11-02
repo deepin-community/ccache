@@ -1,3 +1,92 @@
+ccache (4.8.3-1) unstable; urgency=medium
+
+  * New upstream release 4.8.3
+
+ -- Joel Rosdahl <joel@debian.org>  Sat, 16 Sep 2023 12:46:26 +0200
+
+ccache (4.8.2-1) unstable; urgency=medium
+
+  * New upstream release 4.8.2
+
+ -- Joel Rosdahl <joel@debian.org>  Sun, 23 Jul 2023 09:17:51 +0200
+
+ccache (4.8+really4.7.5-1) unstable; urgency=medium
+
+  * New upstream release 4.7.5, fixing an issue with hanging processes by
+    a small change of a default setting compared to version 4.7.4
+    (closes: #1033191)
+
+ -- Joel Rosdahl <joel@debian.org>  Thu, 23 Mar 2023 08:39:58 +0100
+
+ccache (4.8-1) unstable; urgency=medium
+
+  * New upstream release 4.8, which fixes an issue with hanging processes
+
+ -- Joel Rosdahl <joel@debian.org>  Sun, 19 Mar 2023 10:32:54 +0100
+
+ccache (4.7.4-1) unstable; urgency=medium
+
+  * New upstream release 4.7.4
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 21 Nov 2022 20:40:46 +0100
+
+ccache (4.7.3-1) unstable; urgency=medium
+
+  * New upstream release 4.7.3
+
+ -- Joel Rosdahl <joel@debian.org>  Sat, 05 Nov 2022 22:29:17 +0100
+
+ccache (4.7.2-1) unstable; urgency=medium
+
+  * New upstream release 4.7.2 (closes: #1022704)
+
+ -- Joel Rosdahl <joel@debian.org>  Sat, 29 Oct 2022 16:52:18 +0200
+
+ccache (4.7.1-1) unstable; urgency=medium
+
+  * New upstream release 4.7.1
+
+ -- Joel Rosdahl <joel@debian.org>  Sun, 23 Oct 2022 20:20:24 +0200
+
+ccache (4.7-1) unstable; urgency=medium
+
+  [ Debian Janitor ]
+  * Remove constraints unnecessary since buster (oldstable)
+
+  [ Joel Rosdahl ]
+  * New upstream release 4.7
+  * Bump Standards-Version to 4.6.1 with no changes
+  * Update Debian-specific documentation patch
+  * Update debian/copyright
+
+ -- Joel Rosdahl <joel@debian.org>  Tue, 18 Oct 2022 21:43:05 +0200
+
+ccache (4.6.3-1) unstable; urgency=medium
+
+  * New upstream release 4.6.3
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 05 Sep 2022 15:05:41 +0200
+
+ccache (4.6.1-1) unstable; urgency=medium
+
+  * New upstream release 4.6.1 (closes: #1007732)
+  * Update debian/copyright
+
+ -- Joel Rosdahl <joel@debian.org>  Sun, 15 May 2022 21:48:25 +0200
+
+ccache (4.6-1) unstable; urgency=medium
+
+  * New upstream release 4.6
+  * Update debian/copyright
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 28 Feb 2022 19:36:53 +0100
+
+ccache (4.5.1-1) unstable; urgency=medium
+
+  * New upstream release 4.5.1
+
+ -- Joel Rosdahl <joel@debian.org>  Wed, 17 Nov 2021 20:59:25 +0100
+
 ccache (4.5-1) unstable; urgency=medium
 
   * Refer to common license file for CC0-1.0
