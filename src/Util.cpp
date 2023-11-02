@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -24,12 +24,18 @@
 #include "Logging.hpp"
 #include "TemporaryFile.hpp"
 #include "Win32Util.hpp"
-#include "fmtmacros.hpp"
 
+#include <Config.hpp>
+#include <Finalizer.hpp>
 #include <core/exceptions.hpp>
 #include <core/wincompat.hpp>
+#include <fmtmacros.hpp>
+#include <util/TimePoint.hpp>
+#include <util/file.hpp>
 #include <util/path.hpp>
 #include <util/string.hpp>
+
+#include <limits.h> // NOLINT: PATH_MAX is defined in limits.h
 
 extern "C" {
 #include "third_party/base32hex.h"
@@ -45,34 +51,8 @@ extern "C" {
 
 #include <fcntl.h>
 
-#include <algorithm>
-#include <climits>
-#include <fstream>
-
-#ifndef HAVE_DIRENT_H
-#  include <filesystem>
-#endif
-
 #ifdef HAVE_PWD_H
 #  include <pwd.h>
-#endif
-
-#ifdef HAVE_SYS_TIME_H
-#  include <sys/time.h>
-#endif
-
-#ifdef HAVE_UTIME_H
-#  include <utime.h>
-#elif defined(HAVE_SYS_UTIME_H)
-#  include <sys/utime.h>
-#endif
-
-#ifdef HAVE_LINUX_FS_H
-#  include <linux/magic.h>
-#  include <sys/statfs.h>
-#elif defined(HAVE_STRUCT_STATFS_F_FSTYPENAME)
-#  include <sys/mount.h>
-#  include <sys/param.h>
 #endif
 
 #ifdef __linux__
@@ -97,11 +77,16 @@ extern "C" {
 #  endif
 #endif
 
-using nonstd::nullopt;
-using nonstd::optional;
-using nonstd::string_view;
+using IncludeDelimiter = util::Tokenizer::IncludeDelimiter;
 
 namespace {
+
+// Process umask, read and written by get_umask and set_umask.
+mode_t g_umask = [] {
+  const mode_t mask = umask(0);
+  umask(mask);
+  return mask;
+}();
 
 // Search for the first match of the following regular expression:
 //
@@ -110,8 +95,8 @@ namespace {
 // The primary reason for not using std::regex is that it's not available for
 // GCC 4.8. It's also a bit bloated. The reason for not using POSIX regex
 // functionality is that it's are not available in MinGW.
-string_view
-find_first_ansi_csi_seq(string_view string)
+std::string_view
+find_first_ansi_csi_seq(std::string_view string)
 {
   size_t pos = 0;
   while (pos < string.length() && string[pos] != 0x1b) {
@@ -154,25 +139,31 @@ path_max(const std::string& path)
 
 template<typename T>
 std::vector<T>
-split_into(string_view string,
+split_into(std::string_view string,
            const char* separators,
-           util::Tokenizer::Mode mode)
+           util::Tokenizer::Mode mode,
+           IncludeDelimiter include_delimiter)
+
 {
   std::vector<T> result;
-  for (const auto token : util::Tokenizer(string, separators, mode)) {
+  for (const auto token :
+       util::Tokenizer(string, separators, mode, include_delimiter)) {
     result.emplace_back(token);
   }
   return result;
 }
 
 std::string
-rewrite_stderr_to_absolute_paths(string_view text)
+rewrite_stderr_to_absolute_paths(std::string_view text)
 {
   static const std::string in_file_included_from = "In file included from ";
 
   std::string result;
-  for (auto line :
-       util::Tokenizer(text, "\n", util::Tokenizer::Mode::skip_last_empty)) {
+  using util::Tokenizer;
+  for (auto line : Tokenizer(text,
+                             "\n",
+                             Tokenizer::Mode::include_empty,
+                             Tokenizer::IncludeDelimiter::yes)) {
     // Rewrite <path> to <absolute path> in the following two cases, where X may
     // be optional ANSI CSI sequences:
     //
@@ -189,7 +180,7 @@ rewrite_stderr_to_absolute_paths(string_view text)
       line = line.substr(csi_seq.length());
     }
     size_t path_end = line.find(':');
-    if (path_end == string_view::npos) {
+    if (path_end == std::string_view::npos) {
       result.append(line.data(), line.length());
     } else {
       std::string path(line.substr(0, path_end));
@@ -201,7 +192,6 @@ rewrite_stderr_to_absolute_paths(string_view text)
         result.append(line.data(), line.length());
       }
     }
-    result += '\n';
   }
   return result;
 }
@@ -210,8 +200,8 @@ rewrite_stderr_to_absolute_paths(string_view text)
 
 namespace Util {
 
-string_view
-base_name(string_view path)
+std::string_view
+base_name(std::string_view path)
 {
 #ifdef _WIN32
   const char delim[] = "/\\";
@@ -223,9 +213,9 @@ base_name(string_view path)
 }
 
 std::string
-change_extension(string_view path, string_view new_ext)
+change_extension(std::string_view path, std::string_view new_ext)
 {
-  string_view without_ext = Util::remove_extension(path);
+  std::string_view without_ext = Util::remove_extension(path);
   return std::string(without_ext).append(new_ext.data(), new_ext.length());
 }
 
@@ -236,7 +226,7 @@ clone_file(const std::string& src, const std::string& dest, bool via_tmp_file)
 #  if defined(__linux__)
   Fd src_fd(open(src.c_str(), O_RDONLY));
   if (!src_fd) {
-    throw core::Error("{}: {}", src, strerror(errno));
+    throw core::Error(FMT("{}: {}", src, strerror(errno)));
   }
 
   Fd dest_fd;
@@ -249,7 +239,7 @@ clone_file(const std::string& src, const std::string& dest, bool via_tmp_file)
     dest_fd =
       Fd(open(dest.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666));
     if (!dest_fd) {
-      throw core::Error("{}: {}", src, strerror(errno));
+      throw core::Error(FMT("{}: {}", src, strerror(errno)));
     }
   }
 
@@ -278,12 +268,12 @@ clone_file(const std::string& src, const std::string& dest, bool via_tmp_file)
 #endif // FILE_CLONING_SUPPORTED
 
 void
-clone_hard_link_or_copy_file(const Context& ctx,
+clone_hard_link_or_copy_file(const Config& config,
                              const std::string& source,
                              const std::string& dest,
                              bool via_tmp_file)
 {
-  if (ctx.config.file_clone()) {
+  if (config.file_clone()) {
 #ifdef FILE_CLONING_SUPPORTED
     LOG("Cloning {} to {}", source, dest);
     try {
@@ -296,16 +286,18 @@ clone_hard_link_or_copy_file(const Context& ctx,
     LOG("Not cloning {} to {} since it's unsupported", source, dest);
 #endif
   }
-  if (ctx.config.hard_link()) {
+  if (config.hard_link()) {
     LOG("Hard linking {} to {}", source, dest);
     try {
       Util::hard_link(source, dest);
-      if (chmod(dest.c_str(), 0444) != 0) {
-        LOG("Failed to chmod: {}", strerror(errno));
+#ifndef _WIN32
+      if (chmod(dest.c_str(), 0444 & ~Util::get_umask()) != 0) {
+        LOG("Failed to chmod {}: {}", dest.c_str(), strerror(errno));
       }
+#endif
       return;
     } catch (const core::Error& e) {
-      LOG_RAW(e.what());
+      LOG("Failed to hard link {} to {}: {}", source, dest, e.what());
       // Fall back to copying.
     }
   }
@@ -315,7 +307,7 @@ clone_hard_link_or_copy_file(const Context& ctx,
 }
 
 size_t
-common_dir_prefix_length(string_view dir, string_view path)
+common_dir_prefix_length(std::string_view dir, std::string_view path)
 {
   if (dir.empty() || path.empty() || dir == "/" || path == "/") {
     return 0;
@@ -347,17 +339,21 @@ common_dir_prefix_length(string_view dir, string_view path)
 void
 copy_fd(int fd_in, int fd_out)
 {
-  read_fd(fd_in,
-          [=](const void* data, size_t size) { write_fd(fd_out, data, size); });
+  util::read_fd(fd_in, [=](const void* data, size_t size) {
+    util::write_fd(fd_out, data, size);
+  });
 }
 
 void
 copy_file(const std::string& src, const std::string& dest, bool via_tmp_file)
 {
-  Fd src_fd(open(src.c_str(), O_RDONLY));
+  Fd src_fd(open(src.c_str(), O_RDONLY | O_BINARY));
   if (!src_fd) {
-    throw core::Error("{}: {}", src, strerror(errno));
+    throw core::Error(
+      FMT("Failed to open {} for reading: {}", src, strerror(errno)));
   }
+
+  unlink(dest.c_str());
 
   Fd dest_fd;
   std::string tmp_file;
@@ -369,7 +365,8 @@ copy_file(const std::string& src, const std::string& dest, bool via_tmp_file)
     dest_fd =
       Fd(open(dest.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666));
     if (!dest_fd) {
-      throw core::Error("{}: {}", dest, strerror(errno));
+      throw core::Error(
+        FMT("Failed to open {} for writing: {}", dest, strerror(errno)));
     }
   }
 
@@ -383,7 +380,7 @@ copy_file(const std::string& src, const std::string& dest, bool via_tmp_file)
 }
 
 bool
-create_dir(string_view dir)
+create_dir(std::string_view dir)
 {
   std::string dir_str(dir);
   auto st = Stat::stat(dir_str);
@@ -410,8 +407,8 @@ create_dir(string_view dir)
   }
 }
 
-string_view
-dir_name(string_view path)
+std::string_view
+dir_name(std::string_view path)
 {
 #ifdef _WIN32
   const char delim[] = "/\\";
@@ -441,7 +438,8 @@ expand_environment_variables(const std::string& str)
 {
   std::string result;
   const char* left = str.c_str();
-  for (const char* right = left; *right; ++right) {
+  const char* right = left;
+  while (*right) {
     if (*right == '$') {
       result.append(left, right - left);
 
@@ -455,7 +453,7 @@ expand_environment_variables(const std::string& str)
         ++right;
       }
       if (curly && *right != '}') {
-        throw core::Error("syntax error: missing '}}' after \"{}\"", left);
+        throw core::Error(FMT("syntax error: missing '}}' after \"{}\"", left));
       }
       if (right == left) {
         // Special case: don't consider a single $ the left of a variable.
@@ -465,7 +463,7 @@ expand_environment_variables(const std::string& str)
         std::string name(left, right - left);
         const char* value = getenv(name.c_str());
         if (!value) {
-          throw core::Error("environment variable \"{}\" not set", name);
+          throw core::Error(FMT("environment variable \"{}\" not set", name));
         }
         result += value;
         if (!curly) {
@@ -474,6 +472,7 @@ expand_environment_variables(const std::string& str)
         left = right + 1;
       }
     }
+    ++right;
   }
   result += left;
   return result;
@@ -483,8 +482,13 @@ int
 fallocate(int fd, long new_size)
 {
 #ifdef HAVE_POSIX_FALLOCATE
-  return posix_fallocate(fd, 0, new_size);
-#else
+  const int posix_fallocate_err = posix_fallocate(fd, 0, new_size);
+  if (posix_fallocate_err == 0 || posix_fallocate_err != EINVAL) {
+    return posix_fallocate_err;
+  }
+  // the underlying filesystem does not support the operation so fallback to
+  // lseeks
+#endif
   off_t saved_pos = lseek(fd, 0, SEEK_END);
   off_t old_size = lseek(fd, 0, SEEK_END);
   if (old_size == -1) {
@@ -504,14 +508,13 @@ fallocate(int fd, long new_size)
   }
   int err = 0;
   try {
-    write_fd(fd, buf, bytes_to_write);
+    util::write_fd(fd, buf, bytes_to_write);
   } catch (core::Error&) {
     err = errno;
   }
   lseek(fd, saved_pos, SEEK_SET);
   free(buf);
   return err;
-#endif
 }
 
 std::string
@@ -522,9 +525,11 @@ format_argv_for_logging(const char* const* argv)
     if (i != 0) {
       result += ' ';
     }
-    for (const char* arg = argv[i]; *arg; ++arg) {
-      result += *arg;
+    std::string arg(argv[i]);
+    if (arg.empty() || arg.find(' ') != std::string::npos) {
+      arg = FMT("\"{}\"", arg);
     }
+    result += arg;
   }
   return result;
 }
@@ -552,36 +557,12 @@ format_base32hex(const uint8_t* data, size_t size)
   return result;
 }
 
-std::string
-format_human_readable_size(uint64_t size)
-{
-  if (size >= 1000 * 1000 * 1000) {
-    return FMT("{:.1f} GB", size / ((double)(1000 * 1000 * 1000)));
-  } else if (size >= 1000 * 1000) {
-    return FMT("{:.1f} MB", size / ((double)(1000 * 1000)));
-  } else {
-    return FMT("{:.1f} kB", size / 1000.0);
-  }
-}
-
-std::string
-format_parsable_size_with_suffix(uint64_t size)
-{
-  if (size >= 1000 * 1000 * 1000) {
-    return FMT("{:.1f}G", size / ((double)(1000 * 1000 * 1000)));
-  } else if (size >= 1000 * 1000) {
-    return FMT("{:.1f}M", size / ((double)(1000 * 1000)));
-  } else {
-    return FMT("{}", size);
-  }
-}
-
 void
-ensure_dir_exists(nonstd::string_view dir)
+ensure_dir_exists(std::string_view dir)
 {
   if (!create_dir(dir)) {
     throw core::Fatal(
-      "Failed to create directory {}: {}", dir, strerror(errno));
+      FMT("Failed to create directory {}: {}", dir, strerror(errno)));
   }
 }
 
@@ -615,19 +596,14 @@ get_apparent_cwd(const std::string& actual_cwd)
 
   auto pwd_stat = Stat::stat(pwd);
   auto cwd_stat = Stat::stat(actual_cwd);
-  if (!pwd_stat || !cwd_stat || !pwd_stat.same_inode_as(cwd_stat)) {
-    return actual_cwd;
-  }
-  std::string normalized_pwd = normalize_absolute_path(pwd);
-  return normalized_pwd == pwd
-             || Stat::stat(normalized_pwd).same_inode_as(pwd_stat)
-           ? normalized_pwd
-           : pwd;
+  return !pwd_stat || !cwd_stat || !pwd_stat.same_inode_as(cwd_stat)
+           ? actual_cwd
+           : normalize_concrete_absolute_path(pwd);
 #endif
 }
 
-string_view
-get_extension(string_view path)
+std::string_view
+get_extension(std::string_view path)
 {
 #ifndef _WIN32
   const char stop_at_chars[] = "./";
@@ -635,7 +611,7 @@ get_extension(string_view path)
   const char stop_at_chars[] = "./\\";
 #endif
   size_t pos = path.find_last_of(stop_at_chars);
-  if (pos == string_view::npos || path.at(pos) == '/') {
+  if (pos == std::string_view::npos || path.at(pos) == '/') {
     return {};
 #ifdef _WIN32
   } else if (path.at(pos) == '\\') {
@@ -649,26 +625,28 @@ get_extension(string_view path)
 std::string
 get_home_directory()
 {
-  const char* p = getenv("HOME");
-  if (p) {
-    return p;
-  }
 #ifdef _WIN32
-  p = getenv("APPDATA");
-  if (p) {
+  if (const char* p = getenv("USERPROFILE")) {
     return p;
   }
-#endif
-#ifdef HAVE_GETPWUID
+  throw core::Fatal(
+    "The USERPROFILE environment variable must be set to your user profile "
+    "folder");
+#else
+  if (const char* p = getenv("HOME")) {
+    return p;
+  }
+#  ifdef HAVE_GETPWUID
   {
     struct passwd* pwd = getpwuid(getuid());
     if (pwd) {
       return pwd->pw_dir;
     }
   }
-#endif
+#  endif
   throw core::Fatal(
     "Could not determine home directory from $HOME or getpwuid(3)");
+#endif
 }
 
 const char*
@@ -688,7 +666,7 @@ get_hostname()
 }
 
 std::string
-get_relative_path(string_view dir, string_view path)
+get_relative_path(std::string_view dir, std::string_view path)
 {
   ASSERT(util::is_absolute_path(dir));
   ASSERT(util::is_absolute_path(path));
@@ -731,6 +709,12 @@ get_relative_path(string_view dir, string_view path)
   return result.empty() ? "." : result;
 }
 
+mode_t
+get_umask()
+{
+  return g_umask;
+}
+
 void
 hard_link(const std::string& oldpath, const std::string& newpath)
 {
@@ -741,60 +725,67 @@ hard_link(const std::string& oldpath, const std::string& newpath)
 
 #ifndef _WIN32
   if (link(oldpath.c_str(), newpath.c_str()) != 0) {
-    throw core::Error(
-      "failed to link {} to {}: {}", oldpath, newpath, strerror(errno));
+    throw core::Error(strerror(errno));
   }
 #else
   if (!CreateHardLink(newpath.c_str(), oldpath.c_str(), nullptr)) {
-    DWORD error = GetLastError();
-    throw core::Error("failed to link {} to {}: {}",
-                      oldpath,
-                      newpath,
-                      Win32Util::error_message(error));
+    throw core::Error(Win32Util::error_message(GetLastError()));
   }
 #endif
 }
 
-#if defined(HAVE_LINUX_FS_H) || defined(HAVE_STRUCT_STATFS_F_FSTYPENAME)
-int
-is_nfs_fd(int fd, bool* is_nfs)
+std::optional<size_t>
+is_absolute_path_with_prefix(std::string_view path)
 {
-  struct statfs buf;
-  if (fstatfs(fd, &buf) != 0) {
-    return errno;
-  }
-#  ifdef HAVE_LINUX_FS_H
-  *is_nfs = buf.f_type == NFS_SUPER_MAGIC;
-#  else // Mac OS X and some other BSD flavors
-  *is_nfs = strcmp(buf.f_fstypename, "nfs") == 0;
-#  endif
-  return 0;
-}
+#ifdef _WIN32
+  const char delim[] = "/\\";
 #else
-int
-is_nfs_fd(int /*fd*/, bool* /*is_nfs*/)
-{
-  return -1;
-}
+  const char delim[] = "/";
 #endif
+  auto split_pos = path.find_first_of(delim);
+  if (split_pos != std::string::npos) {
+#ifdef _WIN32
+    // -I/C:/foo and -I/c/foo will already be handled by delim_pos correctly
+    // resulting in -I and /C:/foo or /c/foo respectively. -IC:/foo will not as
+    // we would get -IC: and /foo.
+    if (split_pos > 0 && path[split_pos - 1] == ':') {
+      split_pos = split_pos - 2;
+    }
+#endif
+    // This is not redundant on some platforms, so nothing to simplify.
+    // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+    return split_pos;
+  }
+  return std::nullopt;
+}
 
 bool
-is_precompiled_header(string_view path)
+is_ccache_executable(const std::string_view path)
 {
-  string_view ext = get_extension(path);
+  std::string name(Util::base_name(path));
+#ifdef _WIN32
+  name = Util::to_lowercase(name);
+#endif
+  return util::starts_with(name, "ccache");
+}
+
+bool
+is_precompiled_header(std::string_view path)
+{
+  std::string_view ext = get_extension(path);
   return ext == ".gch" || ext == ".pch" || ext == ".pth"
          || get_extension(dir_name(path)) == ".gch";
 }
 
-optional<tm>
-localtime(optional<time_t> time)
+std::optional<tm>
+localtime(std::optional<util::TimePoint> time)
 {
-  time_t timestamp = time ? *time : ::time(nullptr);
+  time_t timestamp = time ? time->sec() : util::TimePoint::now().sec();
   tm result;
   if (localtime_r(&timestamp, &result)) {
     return result;
   } else {
-    return nullopt;
+    return std::nullopt;
   }
 }
 
@@ -802,9 +793,9 @@ std::string
 make_relative_path(const std::string& base_dir,
                    const std::string& actual_cwd,
                    const std::string& apparent_cwd,
-                   nonstd::string_view path)
+                   std::string_view path)
 {
-  if (base_dir.empty() || !util::starts_with(path, base_dir)) {
+  if (base_dir.empty() || !util::path_starts_with(path, base_dir)) {
     return std::string(path);
   }
 
@@ -836,8 +827,9 @@ make_relative_path(const std::string& base_dir,
   const auto path_suffix = std::string(original_path.substr(path.length()));
   const auto real_path = Util::real_path(std::string(path));
 
-  const auto add_relpath_candidates = [&](auto path) {
-    const std::string normalized_path = Util::normalize_absolute_path(path);
+  const auto add_relpath_candidates = [&](auto p) {
+    const std::string normalized_path =
+      Util::normalize_abstract_absolute_path(p);
     relpath_candidates.push_back(
       Util::get_relative_path(actual_cwd, normalized_path));
     if (apparent_cwd != actual_cwd) {
@@ -867,43 +859,38 @@ make_relative_path(const std::string& base_dir,
 }
 
 std::string
-make_relative_path(const Context& ctx, string_view path)
+make_relative_path(const Context& ctx, std::string_view path)
 {
   return make_relative_path(
     ctx.config.base_dir(), ctx.actual_cwd, ctx.apparent_cwd, path);
 }
 
 bool
-matches_dir_prefix_or_file(string_view dir_prefix_or_file, string_view path)
+matches_dir_prefix_or_file(std::string_view dir_prefix_or_file,
+                           std::string_view path)
 {
   return !dir_prefix_or_file.empty() && !path.empty()
          && dir_prefix_or_file.length() <= path.length()
-         && path.starts_with(dir_prefix_or_file)
+         && util::starts_with(path, dir_prefix_or_file)
          && (dir_prefix_or_file.length() == path.length()
              || is_dir_separator(path[dir_prefix_or_file.length()])
              || is_dir_separator(dir_prefix_or_file.back()));
 }
 
-std::string
-normalize_absolute_path(string_view path)
+static std::string
+do_normalize_abstract_absolute_path(std::string_view path)
 {
   if (!util::is_absolute_path(path)) {
     return std::string(path);
   }
 
 #ifdef _WIN32
-  if (path.find("\\") != string_view::npos) {
-    std::string new_path(path);
-    std::replace(new_path.begin(), new_path.end(), '\\', '/');
-    return normalize_absolute_path(new_path);
-  }
-
   std::string drive(path.substr(0, 2));
   path = path.substr(2);
 #endif
 
   std::string result = "/";
-  const size_t npos = string_view::npos;
+  const size_t npos = std::string_view::npos;
   size_t left = 1;
 
   while (true) {
@@ -911,7 +898,8 @@ normalize_absolute_path(string_view path)
       break;
     }
     const auto right = path.find('/', left);
-    string_view part = path.substr(left, right == npos ? npos : right - left);
+    std::string_view part =
+      path.substr(left, right == npos ? npos : right - left);
     if (part == "..") {
       if (result.length() > 1) {
         // "/x/../part" -> "/part"
@@ -943,8 +931,30 @@ normalize_absolute_path(string_view path)
 #endif
 }
 
+std::string
+normalize_abstract_absolute_path(std::string_view path)
+{
+#ifdef _WIN32
+  std::string new_path(path);
+  std::replace(new_path.begin(), new_path.end(), '\\', '/');
+  return do_normalize_abstract_absolute_path(new_path);
+#else
+  return do_normalize_abstract_absolute_path(path);
+#endif
+}
+
+std::string
+normalize_concrete_absolute_path(const std::string& path)
+{
+  const auto normalized_path = normalize_abstract_absolute_path(path);
+  return (normalized_path == path
+          || Stat::stat(normalized_path).same_inode_as(Stat::stat(path)))
+           ? normalized_path
+           : path;
+}
+
 uint64_t
-parse_duration(const std::string& duration)
+parse_duration(std::string_view duration)
 {
   uint64_t factor = 0;
   char last_ch = duration.empty() ? '\0' : duration[duration.length() - 1];
@@ -957,8 +967,8 @@ parse_duration(const std::string& duration)
     factor = 1;
     break;
   default:
-    throw core::Error(
-      "invalid suffix (supported: d (day) and s (second)): \"{}\"", duration);
+    throw core::Error(FMT(
+      "invalid suffix (supported: d (day) and s (second)): \"{}\"", duration));
   }
 
   const auto value =
@@ -968,113 +978,6 @@ parse_duration(const std::string& duration)
   } else {
     throw core::Error(value.error());
   }
-}
-
-uint64_t
-parse_size(const std::string& value)
-{
-  errno = 0;
-
-  char* p;
-  double result = strtod(value.c_str(), &p);
-  if (errno != 0 || result < 0 || p == value.c_str() || value.empty()) {
-    throw core::Error("invalid size: \"{}\"", value);
-  }
-
-  while (isspace(*p)) {
-    ++p;
-  }
-
-  if (*p != '\0') {
-    unsigned multiplier = *(p + 1) == 'i' ? 1024 : 1000;
-    switch (*p) {
-    case 'T':
-      result *= multiplier;
-    // Fallthrough.
-    case 'G':
-      result *= multiplier;
-    // Fallthrough.
-    case 'M':
-      result *= multiplier;
-    // Fallthrough.
-    case 'K':
-    case 'k':
-      result *= multiplier;
-      break;
-    default:
-      throw core::Error("invalid size: \"{}\"", value);
-    }
-  } else {
-    // Default suffix: G.
-    result *= 1000 * 1000 * 1000;
-  }
-  return static_cast<uint64_t>(result);
-}
-
-bool
-read_fd(int fd, DataReceiver data_receiver)
-{
-  int64_t n;
-  char buffer[CCACHE_READ_BUFFER_SIZE];
-  while ((n = read(fd, buffer, sizeof(buffer))) != 0) {
-    if (n == -1 && errno != EINTR) {
-      break;
-    }
-    if (n > 0) {
-      data_receiver(buffer, n);
-    }
-  }
-  return n >= 0;
-}
-
-std::string
-read_file(const std::string& path, size_t size_hint)
-{
-  if (size_hint == 0) {
-    auto stat = Stat::stat(path);
-    if (!stat) {
-      throw core::Error(strerror(errno));
-    }
-    size_hint = stat.size();
-  }
-
-  // +1 to be able to detect EOF in the first read call
-  size_hint = (size_hint < 1024) ? 1024 : size_hint + 1;
-
-  Fd fd(open(path.c_str(), O_RDONLY | O_BINARY));
-  if (!fd) {
-    throw core::Error(strerror(errno));
-  }
-
-  int64_t ret = 0;
-  size_t pos = 0;
-  std::string result;
-  result.resize(size_hint);
-
-  while (true) {
-    if (pos == result.size()) {
-      result.resize(2 * result.size());
-    }
-    const size_t max_read = result.size() - pos;
-    ret = read(*fd, &result[pos], max_read);
-    if (ret == 0 || (ret == -1 && errno != EINTR)) {
-      break;
-    }
-    if (ret > 0) {
-      pos += ret;
-      if (static_cast<size_t>(ret) < max_read) {
-        break;
-      }
-    }
-  }
-
-  if (ret == -1) {
-    LOG("Failed reading {}", path);
-    throw core::Error(strerror(errno));
-  }
-
-  result.resize(pos);
-  return result;
 }
 
 #ifndef _WIN32
@@ -1133,8 +1036,8 @@ real_path(const std::string& path, bool return_empty_on_error)
   return resolved ? resolved : (return_empty_on_error ? "" : path);
 }
 
-string_view
-remove_extension(string_view path)
+std::string_view
+remove_extension(std::string_view path)
 {
   return path.substr(0, path.length() - get_extension(path).length());
 }
@@ -1145,7 +1048,7 @@ rename(const std::string& oldpath, const std::string& newpath)
 #ifndef _WIN32
   if (::rename(oldpath.c_str(), newpath.c_str()) != 0) {
     throw core::Error(
-      "failed to rename {} to {}: {}", oldpath, newpath, strerror(errno));
+      FMT("failed to rename {} to {}: {}", oldpath, newpath, strerror(errno)));
   }
 #else
   // Windows' rename() won't overwrite an existing file, so need to use
@@ -1153,51 +1056,46 @@ rename(const std::string& oldpath, const std::string& newpath)
   if (!MoveFileExA(
         oldpath.c_str(), newpath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     DWORD error = GetLastError();
-    throw core::Error("failed to rename {} to {}: {}",
-                      oldpath,
-                      newpath,
-                      Win32Util::error_message(error));
+    throw core::Error(FMT("failed to rename {} to {}: {}",
+                          oldpath,
+                          newpath,
+                          Win32Util::error_message(error)));
   }
-#endif
-}
-
-bool
-same_program_name(nonstd::string_view program_name,
-                  nonstd::string_view canonical_program_name)
-{
-#ifdef _WIN32
-  std::string lowercase_program_name = Util::to_lowercase(program_name);
-  return lowercase_program_name == canonical_program_name
-         || lowercase_program_name == FMT("{}.exe", canonical_program_name);
-#else
-  return program_name == canonical_program_name;
 #endif
 }
 
 void
-send_to_stderr(const Context& ctx, const std::string& text)
+send_to_fd(const Context& ctx, std::string_view text, int fd)
 {
-  const std::string* text_to_send = &text;
+  std::string_view text_to_send = text;
   std::string modified_text;
+
+#ifdef _WIN32
+  // stdout/stderr are normally opened in text mode, which would convert
+  // newlines a second time since we treat output as binary data. Make sure to
+  // switch to binary mode.
+  int oldmode = _setmode(fd, _O_BINARY);
+  Finalizer binary_mode_restorer([=] { _setmode(fd, oldmode); });
+#endif
 
   if (ctx.args_info.strip_diagnostics_colors) {
     try {
       modified_text = strip_ansi_csi_seqs(text);
-      text_to_send = &modified_text;
+      text_to_send = modified_text;
     } catch (const core::Error&) {
-      // Fall through
+      // Ignore.
     }
   }
 
   if (ctx.config.absolute_paths_in_stderr()) {
-    modified_text = rewrite_stderr_to_absolute_paths(*text_to_send);
-    text_to_send = &modified_text;
+    modified_text = rewrite_stderr_to_absolute_paths(text_to_send);
+    text_to_send = modified_text;
   }
 
-  try {
-    write_fd(STDERR_FILENO, text_to_send->data(), text_to_send->length());
-  } catch (core::Error& e) {
-    throw core::Error("Failed to write to stderr: {}", e.what());
+  const auto result =
+    util::write_fd(fd, text_to_send.data(), text_to_send.length());
+  if (!result) {
+    throw core::Error(FMT("Failed to write to {}: {}", fd, result.error()));
   }
 }
 
@@ -1214,6 +1112,13 @@ set_cloexec_flag(int fd)
 #endif
 }
 
+mode_t
+set_umask(mode_t mask)
+{
+  g_umask = mask;
+  return umask(mask);
+}
+
 void
 setenv(const std::string& name, const std::string& value)
 {
@@ -1226,24 +1131,27 @@ setenv(const std::string& name, const std::string& value)
 #endif
 }
 
-std::vector<string_view>
-split_into_views(string_view string,
+std::vector<std::string_view>
+split_into_views(std::string_view string,
                  const char* separators,
-                 util::Tokenizer::Mode mode)
+                 util::Tokenizer::Mode mode,
+                 IncludeDelimiter include_delimiter)
 {
-  return split_into<string_view>(string, separators, mode);
+  return split_into<std::string_view>(
+    string, separators, mode, include_delimiter);
 }
 
 std::vector<std::string>
-split_into_strings(string_view string,
+split_into_strings(std::string_view string,
                    const char* separators,
-                   util::Tokenizer::Mode mode)
+                   util::Tokenizer::Mode mode,
+                   IncludeDelimiter include_delimiter)
 {
-  return split_into<std::string>(string, separators, mode);
+  return split_into<std::string>(string, separators, mode, include_delimiter);
 }
 
 std::string
-strip_ansi_csi_seqs(string_view string)
+strip_ansi_csi_seqs(std::string_view string)
 {
   size_t pos = 0;
   std::string result;
@@ -1265,7 +1173,7 @@ strip_ansi_csi_seqs(string_view string)
 }
 
 std::string
-to_lowercase(string_view string)
+to_lowercase(std::string_view string)
 {
   std::string result;
   result.resize(string.length());
@@ -1300,9 +1208,9 @@ traverse(const std::string& path, const TraverseVisitor& visitor)
           if (stat.error_number() == ENOENT || stat.error_number() == ESTALE) {
             continue;
           }
-          throw core::Error("failed to lstat {}: {}",
-                            entry_path,
-                            strerror(stat.error_number()));
+          throw core::Error(FMT("failed to lstat {}: {}",
+                                entry_path,
+                                strerror(stat.error_number())));
         }
         is_dir = stat.is_directory();
       }
@@ -1317,7 +1225,8 @@ traverse(const std::string& path, const TraverseVisitor& visitor)
   } else if (errno == ENOTDIR) {
     visitor(path, false);
   } else {
-    throw core::Error("failed to open directory {}: {}", path, strerror(errno));
+    throw core::Error(
+      FMT("failed to open directory {}: {}", path, strerror(errno)));
   }
 }
 
@@ -1340,7 +1249,8 @@ traverse(const std::string& path, const TraverseVisitor& visitor)
   } else if (std::filesystem::exists(path)) {
     visitor(path, false);
   } else {
-    throw core::Error("failed to open directory {}: {}", path, strerror(errno));
+    throw core::Error(
+      FMT("failed to open directory {}: {}", path, strerror(errno)));
   }
 }
 
@@ -1354,7 +1264,8 @@ unlink_safe(const std::string& path, UnlinkLog unlink_log)
   // If path is on an NFS share, unlink isn't atomic, so we rename to a temp
   // file. We don't care if the temp file is trashed, so it's always safe to
   // unlink it first.
-  std::string tmp_name = path + ".ccache.rm.tmp";
+  const std::string tmp_name =
+    FMT("{}.ccache{}unlink", path, TemporaryFile::tmp_file_infix);
 
   bool success = true;
   try {
@@ -1405,18 +1316,10 @@ unsetenv(const std::string& name)
 {
 #ifdef HAVE_UNSETENV
   ::unsetenv(name.c_str());
+#elif defined(_WIN32)
+  SetEnvironmentVariable(name.c_str(), NULL);
 #else
   putenv(strdup(name.c_str())); // Leak to environment.
-#endif
-}
-
-void
-update_mtime(const std::string& path)
-{
-#ifdef HAVE_UTIMES
-  utimes(path.c_str(), nullptr);
-#else
-  utime(path.c_str(), nullptr);
 #endif
 }
 
@@ -1429,46 +1332,12 @@ wipe_path(const std::string& path)
   traverse(path, [](const std::string& p, bool is_dir) {
     if (is_dir) {
       if (rmdir(p.c_str()) != 0 && errno != ENOENT && errno != ESTALE) {
-        throw core::Error("failed to rmdir {}: {}", p, strerror(errno));
+        throw core::Error(FMT("failed to rmdir {}: {}", p, strerror(errno)));
       }
     } else if (unlink(p.c_str()) != 0 && errno != ENOENT && errno != ESTALE) {
-      throw core::Error("failed to unlink {}: {}", p, strerror(errno));
+      throw core::Error(FMT("failed to unlink {}: {}", p, strerror(errno)));
     }
   });
-}
-
-void
-write_fd(int fd, const void* data, size_t size)
-{
-  int64_t written = 0;
-  do {
-    const auto count =
-      write(fd, static_cast<const uint8_t*>(data) + written, size - written);
-    if (count == -1) {
-      if (errno != EAGAIN && errno != EINTR) {
-        throw core::Error(strerror(errno));
-      }
-    } else {
-      written += count;
-    }
-  } while (static_cast<size_t>(written) < size);
-}
-
-void
-write_file(const std::string& path,
-           const std::string& data,
-           std::ios_base::openmode open_mode)
-{
-  if (path.empty()) {
-    throw core::Error("No such file or directory");
-  }
-
-  open_mode |= std::ios::out;
-  std::ofstream file(path, open_mode);
-  if (!file) {
-    throw core::Error(strerror(errno));
-  }
-  file << data;
 }
 
 } // namespace Util

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,6 +18,9 @@
 
 #pragma once
 
+#include <util/BitSet.hpp>
+
+#include <cstdint>
 #include <string>
 
 namespace core {
@@ -46,50 +49,12 @@ enum class Sloppy : uint32_t {
   modules = 1U << 9,
   // Ignore virtual file system (VFS) overlay file.
   ivfsoverlay = 1U << 10,
+  // Allow us to include incorrect working directory in .gcno files.
+  gcno_cwd = 1U << 11,
+  // Ignore -frandom-seed=*string*.
+  random_seed = 1U << 12,
 };
 
-class Sloppiness
-{
-public:
-  Sloppiness(Sloppy value = Sloppy::none);
-  explicit Sloppiness(uint32_t value);
-
-  void enable(Sloppy value);
-  bool is_enabled(Sloppy value) const;
-  uint32_t to_bitmask() const;
-
-private:
-  Sloppy m_sloppiness = Sloppy::none;
-};
-
-// --- Inline implementations ---
-
-inline Sloppiness::Sloppiness(Sloppy value) : m_sloppiness(value)
-{
-}
-
-inline Sloppiness::Sloppiness(uint32_t value)
-  : m_sloppiness(static_cast<Sloppy>(value))
-{
-}
-
-inline void
-Sloppiness::enable(Sloppy value)
-{
-  m_sloppiness = static_cast<Sloppy>(static_cast<uint32_t>(m_sloppiness)
-                                     | static_cast<uint32_t>(value));
-}
-
-inline bool
-Sloppiness::is_enabled(Sloppy value) const
-{
-  return static_cast<uint32_t>(m_sloppiness) & static_cast<uint32_t>(value);
-}
-
-inline uint32_t
-Sloppiness::to_bitmask() const
-{
-  return static_cast<uint32_t>(m_sloppiness);
-}
+using Sloppiness = util::BitSet<Sloppy>;
 
 } // namespace core

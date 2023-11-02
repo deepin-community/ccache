@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -20,12 +20,19 @@
 
 #include <third_party/doctest.h>
 
+#include <ostream> // https://github.com/doctest/doctest/issues/618
 #include <vector>
 
 static bool
-operator==(
-  std::pair<nonstd::string_view, nonstd::optional<nonstd::string_view>> left,
-  std::pair<nonstd::string_view, nonstd::optional<nonstd::string_view>> right)
+operator==(std::pair<std::string, std::optional<std::string>> left,
+           std::pair<std::string, std::optional<std::string>> right)
+{
+  return left.first == right.first && left.second == right.second;
+}
+
+static bool
+operator==(std::pair<std::string_view, std::optional<std::string_view>> left,
+           std::pair<std::string_view, std::optional<std::string_view>> right)
 {
   return left.first == right.first && left.second == right.second;
 }
@@ -50,6 +57,140 @@ TEST_CASE("util::ends_with")
   CHECK_FALSE(util::ends_with("x", "xy"));
 }
 
+TEST_CASE("util::format_human_readable_diff")
+{
+  using SUPT = util::SizeUnitPrefixType;
+
+  SUBCASE("binary")
+  {
+    CHECK(util::format_human_readable_diff(0, SUPT::binary) == "0 bytes");
+    CHECK(util::format_human_readable_diff(1, SUPT::binary) == "+1 byte");
+    CHECK(util::format_human_readable_diff(42, SUPT::binary) == "+42 bytes");
+    CHECK(util::format_human_readable_diff(1949, SUPT::binary) == "+1.9 KiB");
+    CHECK(util::format_human_readable_diff(1951, SUPT::binary) == "+1.9 KiB");
+    CHECK(util::format_human_readable_diff(499.7 * 1000, SUPT::binary)
+          == "+488.0 KiB");
+    CHECK(util::format_human_readable_diff(1000 * 1000, SUPT::binary)
+          == "+976.6 KiB");
+    CHECK(util::format_human_readable_diff(1234 * 1000, SUPT::binary)
+          == "+1.2 MiB");
+    CHECK(util::format_human_readable_diff(438.5 * 1000 * 1000, SUPT::binary)
+          == "+418.2 MiB");
+    CHECK(util::format_human_readable_diff(1000 * 1000 * 1000, SUPT::binary)
+          == "+953.7 MiB");
+    CHECK(
+      util::format_human_readable_diff(17.11 * 1000 * 1000 * 1000, SUPT::binary)
+      == "+15.9 GiB");
+
+    CHECK(util::format_human_readable_diff(-1, SUPT::binary) == "-1 byte");
+    CHECK(util::format_human_readable_diff(-42, SUPT::binary) == "-42 bytes");
+    CHECK(util::format_human_readable_diff(-1949, SUPT::binary) == "-1.9 KiB");
+    CHECK(util::format_human_readable_diff(-1951, SUPT::binary) == "-1.9 KiB");
+    CHECK(util::format_human_readable_diff(-499.7 * 1000, SUPT::binary)
+          == "-488.0 KiB");
+    CHECK(util::format_human_readable_diff(-1000 * 1000, SUPT::binary)
+          == "-976.6 KiB");
+    CHECK(util::format_human_readable_diff(-1234 * 1000, SUPT::binary)
+          == "-1.2 MiB");
+    CHECK(util::format_human_readable_diff(-438.5 * 1000 * 1000, SUPT::binary)
+          == "-418.2 MiB");
+    CHECK(util::format_human_readable_diff(-1000 * 1000 * 1000, SUPT::binary)
+          == "-953.7 MiB");
+    CHECK(util::format_human_readable_diff(-17.11 * 1000 * 1000 * 1000,
+                                           SUPT::binary)
+          == "-15.9 GiB");
+  }
+
+  SUBCASE("decimal")
+  {
+    CHECK(util::format_human_readable_diff(0, SUPT::decimal) == "0 bytes");
+    CHECK(util::format_human_readable_diff(1, SUPT::decimal) == "+1 byte");
+    CHECK(util::format_human_readable_diff(42, SUPT::decimal) == "+42 bytes");
+    CHECK(util::format_human_readable_diff(1949, SUPT::decimal) == "+1.9 kB");
+    CHECK(util::format_human_readable_diff(1951, SUPT::decimal) == "+2.0 kB");
+    CHECK(util::format_human_readable_diff(499.7 * 1000, SUPT::decimal)
+          == "+499.7 kB");
+    CHECK(util::format_human_readable_diff(1000 * 1000, SUPT::decimal)
+          == "+1.0 MB");
+    CHECK(util::format_human_readable_diff(1234 * 1000, SUPT::decimal)
+          == "+1.2 MB");
+    CHECK(util::format_human_readable_diff(438.5 * 1000 * 1000, SUPT::decimal)
+          == "+438.5 MB");
+    CHECK(util::format_human_readable_diff(1000 * 1000 * 1000, SUPT::decimal)
+          == "+1.0 GB");
+    CHECK(util::format_human_readable_diff(17.11 * 1000 * 1000 * 1000,
+                                           SUPT::decimal)
+          == "+17.1 GB");
+
+    CHECK(util::format_human_readable_diff(-1, SUPT::decimal) == "-1 byte");
+    CHECK(util::format_human_readable_diff(-42, SUPT::decimal) == "-42 bytes");
+    CHECK(util::format_human_readable_diff(-1949, SUPT::decimal) == "-1.9 kB");
+    CHECK(util::format_human_readable_diff(-1951, SUPT::decimal) == "-2.0 kB");
+    CHECK(util::format_human_readable_diff(-499.7 * 1000, SUPT::decimal)
+          == "-499.7 kB");
+    CHECK(util::format_human_readable_diff(-1000 * 1000, SUPT::decimal)
+          == "-1.0 MB");
+    CHECK(util::format_human_readable_diff(-1234 * 1000, SUPT::decimal)
+          == "-1.2 MB");
+    CHECK(util::format_human_readable_diff(-438.5 * 1000 * 1000, SUPT::decimal)
+          == "-438.5 MB");
+    CHECK(util::format_human_readable_diff(-1000 * 1000 * 1000, SUPT::decimal)
+          == "-1.0 GB");
+    CHECK(util::format_human_readable_diff(-17.11 * 1000 * 1000 * 1000,
+                                           SUPT::decimal)
+          == "-17.1 GB");
+  }
+}
+
+TEST_CASE("util::format_human_readable_size")
+{
+  using SUPT = util::SizeUnitPrefixType;
+
+  SUBCASE("binary")
+  {
+    CHECK(util::format_human_readable_size(0, SUPT::binary) == "0 bytes");
+    CHECK(util::format_human_readable_size(1, SUPT::binary) == "1 byte");
+    CHECK(util::format_human_readable_size(42, SUPT::binary) == "42 bytes");
+    CHECK(util::format_human_readable_size(1949, SUPT::binary) == "1.9 KiB");
+    CHECK(util::format_human_readable_size(1951, SUPT::binary) == "1.9 KiB");
+    CHECK(util::format_human_readable_size(499.7 * 1000, SUPT::binary)
+          == "488.0 KiB");
+    CHECK(util::format_human_readable_size(1000 * 1000, SUPT::binary)
+          == "976.6 KiB");
+    CHECK(util::format_human_readable_size(1234 * 1000, SUPT::binary)
+          == "1.2 MiB");
+    CHECK(util::format_human_readable_size(438.5 * 1000 * 1000, SUPT::binary)
+          == "418.2 MiB");
+    CHECK(util::format_human_readable_size(1000 * 1000 * 1000, SUPT::binary)
+          == "953.7 MiB");
+    CHECK(
+      util::format_human_readable_size(17.11 * 1000 * 1000 * 1000, SUPT::binary)
+      == "15.9 GiB");
+  }
+
+  SUBCASE("decimal")
+  {
+    CHECK(util::format_human_readable_size(0, SUPT::decimal) == "0 bytes");
+    CHECK(util::format_human_readable_size(1, SUPT::decimal) == "1 byte");
+    CHECK(util::format_human_readable_size(42, SUPT::decimal) == "42 bytes");
+    CHECK(util::format_human_readable_size(1949, SUPT::decimal) == "1.9 kB");
+    CHECK(util::format_human_readable_size(1951, SUPT::decimal) == "2.0 kB");
+    CHECK(util::format_human_readable_size(499.7 * 1000, SUPT::decimal)
+          == "499.7 kB");
+    CHECK(util::format_human_readable_size(1000 * 1000, SUPT::decimal)
+          == "1.0 MB");
+    CHECK(util::format_human_readable_size(1234 * 1000, SUPT::decimal)
+          == "1.2 MB");
+    CHECK(util::format_human_readable_size(438.5 * 1000 * 1000, SUPT::decimal)
+          == "438.5 MB");
+    CHECK(util::format_human_readable_size(1000 * 1000 * 1000, SUPT::decimal)
+          == "1.0 GB");
+    CHECK(util::format_human_readable_size(17.11 * 1000 * 1000 * 1000,
+                                           SUPT::decimal)
+          == "17.1 GB");
+  }
+}
+
 TEST_CASE("util::join")
 {
   {
@@ -67,7 +208,7 @@ TEST_CASE("util::join")
     CHECK(util::join(v.begin() + 1, v.end(), "|") == " b |c|");
   }
   {
-    std::vector<nonstd::string_view> v{"1", "2"};
+    std::vector<std::string_view> v{"1", "2"};
     CHECK(util::join(v, " ") == "1 2");
   }
 }
@@ -100,9 +241,9 @@ TEST_CASE("util::parse_signed")
   CHECK(util::parse_signed("0x4").error() == "invalid integer: \"0x4\"");
 
   // Custom description not used for invalid value.
-  CHECK(util::parse_signed("apple", nonstd::nullopt, nonstd::nullopt, "banana")
-          .error()
-        == "invalid integer: \"apple\"");
+  CHECK(
+    util::parse_signed("apple", std::nullopt, std::nullopt, "banana").error()
+    == "invalid integer: \"apple\"");
 
   // Boundary values.
   CHECK(util::parse_signed("-9223372036854775809").error()
@@ -126,12 +267,53 @@ TEST_CASE("util::parse_signed")
         == "banana must be between 1 and 2");
 }
 
+TEST_CASE("util::parse_size")
+{
+  using SUPT = util::SizeUnitPrefixType;
+
+  auto u64 = [](auto i) { return static_cast<uint64_t>(i); };
+  auto h = [&](auto size, auto st) { return std::make_pair(u64(size), st); };
+
+  // Default suffix: Gi
+  CHECK(*util::parse_size("0") == h(0, SUPT::binary));
+  CHECK(*util::parse_size("42")
+        == h(u64(42) * 1024 * 1024 * 1024, SUPT::binary));
+
+  // Decimal suffixes
+  CHECK(*util::parse_size("78k") == h(78 * 1000, SUPT::decimal));
+  CHECK(*util::parse_size("78K") == h(78 * 1000, SUPT::decimal));
+  CHECK(*util::parse_size("1.1 M") == h(u64(1.1 * 1000 * 1000), SUPT::decimal));
+  CHECK(*util::parse_size("438.55M")
+        == h(u64(438.55 * 1000 * 1000), SUPT::decimal));
+  CHECK(*util::parse_size("1 G") == h(1 * 1000 * 1000 * 1000, SUPT::decimal));
+  CHECK(*util::parse_size("2T")
+        == h(u64(2) * 1000 * 1000 * 1000 * 1000, SUPT::decimal));
+
+  // Binary suffixes
+  CHECK(*util::parse_size("78 Ki") == h(78 * 1024, SUPT::binary));
+  CHECK(*util::parse_size("1.1Mi") == h(u64(1.1 * 1024 * 1024), SUPT::binary));
+  CHECK(*util::parse_size("438.55 Mi")
+        == h(u64(438.55 * 1024 * 1024), SUPT::binary));
+  CHECK(*util::parse_size("1Gi") == h(1 * 1024 * 1024 * 1024, SUPT::binary));
+  CHECK(*util::parse_size("2 Ti")
+        == h(u64(2) * 1024 * 1024 * 1024 * 1024, SUPT::binary));
+
+  // With B suffix
+  CHECK(*util::parse_size("9MB") == h(9 * 1000 * 1000, SUPT::decimal));
+  CHECK(*util::parse_size("9MiB") == h(9 * 1024 * 1024, SUPT::binary));
+
+  // Errors
+  CHECK(util::parse_size("").error() == "invalid size: \"\"");
+  CHECK(util::parse_size("x").error() == "invalid size: \"x\"");
+  CHECK(util::parse_size("10x").error() == "invalid size: \"10x\"");
+}
+
 TEST_CASE("util::parse_umask")
 {
-  CHECK(util::parse_umask("1") == 01u);
-  CHECK(util::parse_umask("002") == 2u);
-  CHECK(util::parse_umask("777") == 0777u);
-  CHECK(util::parse_umask("0777") == 0777u);
+  CHECK(util::parse_umask("1") == 1U);
+  CHECK(util::parse_umask("002") == 002U);
+  CHECK(util::parse_umask("777") == 0777U);
+  CHECK(util::parse_umask("0777") == 0777U);
 
   CHECK(util::parse_umask("").error()
         == "invalid unsigned octal integer: \"\"");
@@ -158,8 +340,7 @@ TEST_CASE("util::parse_unsigned")
 
   // Custom description not used for invalid value.
   CHECK(
-    util::parse_unsigned("apple", nonstd::nullopt, nonstd::nullopt, "banana")
-      .error()
+    util::parse_unsigned("apple", std::nullopt, std::nullopt, "banana").error()
     == "invalid unsigned integer: \"apple\"");
 
   // Boundary values.
@@ -171,11 +352,11 @@ TEST_CASE("util::parse_unsigned")
         == "invalid unsigned integer: \"18446744073709551616\"");
 
   // Base
-  CHECK(*util::parse_unsigned("0666", nonstd::nullopt, nonstd::nullopt, "", 8)
+  CHECK(*util::parse_unsigned("0666", std::nullopt, std::nullopt, "", 8)
         == 0666);
-  CHECK(*util::parse_unsigned("0666", nonstd::nullopt, nonstd::nullopt, "", 10)
+  CHECK(*util::parse_unsigned("0666", std::nullopt, std::nullopt, "", 10)
         == 666);
-  CHECK(*util::parse_unsigned("0666", nonstd::nullopt, nonstd::nullopt, "", 16)
+  CHECK(*util::parse_unsigned("0666", std::nullopt, std::nullopt, "", 16)
         == 0x666);
 }
 
@@ -227,19 +408,48 @@ TEST_CASE("util::replace_first")
 
 TEST_CASE("util::split_once")
 {
-  using nonstd::nullopt;
   using std::make_pair;
+  using std::nullopt;
   using util::split_once;
 
-  CHECK(split_once("", '=') == make_pair("", nullopt));
-  CHECK(split_once("a", '=') == make_pair("a", nullopt));
-  CHECK(split_once("=a", '=') == make_pair("", "a"));
-  CHECK(split_once("a=", '=') == make_pair("a", ""));
-  CHECK(split_once("a==", '=') == make_pair("a", "="));
-  CHECK(split_once("a=b", '=') == make_pair("a", "b"));
-  CHECK(split_once("a=b=", '=') == make_pair("a", "b="));
-  CHECK(split_once("a=b=c", '=') == make_pair("a", "b=c"));
-  CHECK(split_once("x y", ' ') == make_pair("x", "y"));
+  SUBCASE("const char*")
+  {
+    CHECK(split_once("", '=') == make_pair("", nullopt));
+    CHECK(split_once("a", '=') == make_pair("a", nullopt));
+    CHECK(split_once("=a", '=') == make_pair("", "a"));
+    CHECK(split_once("a=", '=') == make_pair("a", ""));
+    CHECK(split_once("a==", '=') == make_pair("a", "="));
+    CHECK(split_once("a=b", '=') == make_pair("a", "b"));
+    CHECK(split_once("a=b=", '=') == make_pair("a", "b="));
+    CHECK(split_once("a=b=c", '=') == make_pair("a", "b=c"));
+    CHECK(split_once("x y", ' ') == make_pair("x", "y"));
+  }
+
+  SUBCASE("std::string&&")
+  {
+    CHECK(split_once(std::string(""), '=') == make_pair("", nullopt));
+    CHECK(split_once(std::string("a"), '=') == make_pair("a", nullopt));
+    CHECK(split_once(std::string("=a"), '=') == make_pair("", "a"));
+    CHECK(split_once(std::string("a="), '=') == make_pair("a", ""));
+    CHECK(split_once(std::string("a=="), '=') == make_pair("a", "="));
+    CHECK(split_once(std::string("a=b"), '=') == make_pair("a", "b"));
+    CHECK(split_once(std::string("a=b="), '=') == make_pair("a", "b="));
+    CHECK(split_once(std::string("a=b=c"), '=') == make_pair("a", "b=c"));
+    CHECK(split_once(std::string("x y"), ' ') == make_pair("x", "y"));
+  }
+
+  SUBCASE("std::string_view")
+  {
+    CHECK(split_once(std::string_view(""), '=') == make_pair("", nullopt));
+    CHECK(split_once(std::string_view("a"), '=') == make_pair("a", nullopt));
+    CHECK(split_once(std::string_view("=a"), '=') == make_pair("", "a"));
+    CHECK(split_once(std::string_view("a="), '=') == make_pair("a", ""));
+    CHECK(split_once(std::string_view("a=="), '=') == make_pair("a", "="));
+    CHECK(split_once(std::string_view("a=b"), '=') == make_pair("a", "b"));
+    CHECK(split_once(std::string_view("a=b="), '=') == make_pair("a", "b="));
+    CHECK(split_once(std::string_view("a=b=c"), '=') == make_pair("a", "b=c"));
+    CHECK(split_once(std::string_view("x y"), ' ') == make_pair("x", "y"));
+  }
 }
 
 TEST_CASE("util::starts_with")
@@ -286,6 +496,26 @@ TEST_CASE("util::strip_whitespace")
   CHECK(util::strip_whitespace(" x ") == "x");
   CHECK(util::strip_whitespace(" \n\tx \n\t") == "x");
   CHECK(util::strip_whitespace("  x  y  ") == "x  y");
+}
+
+TEST_CASE("util::to_string")
+{
+  const uint8_t bytes[] = {'f', 'o', 'o'};
+  const char str[] = "foo";
+
+  CHECK(util::to_string(std::string(str)) == std::string(str));
+  CHECK(util::to_string(std::string_view(str)) == std::string(str));
+  CHECK(util::to_string(nonstd::span<const uint8_t>(bytes))
+        == std::string(str));
+  CHECK(util::to_string(util::Bytes(bytes, 3)) == std::string(str));
+}
+
+TEST_CASE("util::to_string_view")
+{
+  uint8_t bytes[] = {'f', 'o', 'o'};
+  char str[] = "foo";
+
+  CHECK(util::to_string_view(nonstd::span(bytes)) == std::string(str));
 }
 
 TEST_SUITE_END();

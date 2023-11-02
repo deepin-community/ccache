@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -97,10 +97,12 @@ argv_to_string(const char* const* argv,
           ++bs;
           break;
         }
-        // Fallthrough.
+        [[fallthrough]];
+
       case '"':
         bs = (bs << 1) + 1;
-      // Fallthrough.
+        [[fallthrough]];
+
       default:
         while (bs > 0) {
           result += '\\';
@@ -130,22 +132,6 @@ get_last_ntstatus()
 }
 
 } // namespace Win32Util
-
-// From: https://stackoverflow.com/a/58162122/262458
-#ifdef _MSC_VER
-int
-gettimeofday(struct timeval* tp, struct timezone* /*tzp*/)
-{
-  namespace sc = std::chrono;
-  sc::system_clock::duration d = sc::system_clock::now().time_since_epoch();
-  sc::seconds s = sc::duration_cast<sc::seconds>(d);
-  tp->tv_sec = static_cast<long>(s.count());
-  tp->tv_usec =
-    static_cast<long>(sc::duration_cast<sc::microseconds>(d - s).count());
-
-  return 0;
-}
-#endif
 
 struct tm*
 localtime_r(time_t* _clock, struct tm* _result)

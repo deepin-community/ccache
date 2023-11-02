@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,32 +19,31 @@
 #pragma once
 
 #include <Stat.hpp>
+#include <util/TimePoint.hpp>
 #include <util/Tokenizer.hpp>
 
-#include "third_party/nonstd/optional.hpp"
-#include "third_party/nonstd/string_view.hpp"
-
-#include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
-#include <ios>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+class Config;
 class Context;
 
 namespace Util {
 
-using DataReceiver = std::function<void(const void* data, size_t size)>;
 using TraverseVisitor =
   std::function<void(const std::string& path, bool is_dir)>;
 
 enum class UnlinkLog { log_failure, ignore_failure };
 
 // Get base name of path.
-nonstd::string_view base_name(nonstd::string_view path);
+std::string_view base_name(std::string_view path);
 
 // Get an integer value from bytes in big endian order.
 //
@@ -78,16 +77,7 @@ big_endian_to_int(const uint8_t* buffer, uint8_t& value)
 
 // Remove the extension via `remove_extension()`, then add `new_ext`. `new_ext`
 // should start with a dot, no extra dot is inserted.
-std::string change_extension(nonstd::string_view path,
-                             nonstd::string_view new_ext);
-
-// Return `value` adjusted to not be less than `min` and not more than `max`.
-template<typename T>
-T
-clamp(T value, T min, T max)
-{
-  return std::min(max, std::max(min, value));
-}
+std::string change_extension(std::string_view path, std::string_view new_ext);
 
 // Clone a file from `src` to `dest`. If `via_tmp_file` is true, `src` is cloned
 // to a temporary file and then renamed to `dest`. Throws `core::Error` on
@@ -99,15 +89,14 @@ void clone_file(const std::string& src,
 // Clone, hard link or copy a file from `source` to `dest` depending on settings
 // in `ctx`. If cloning or hard linking cannot and should not be done the file
 // will be copied instead. Throws `core::Error` on error.
-void clone_hard_link_or_copy_file(const Context& ctx,
+void clone_hard_link_or_copy_file(const Config& config,
                                   const std::string& source,
                                   const std::string& dest,
                                   bool via_tmp_file = false);
 
 // Compute the length of the longest directory path that is common to paths
 // `dir` (a directory) and `path` (any path).
-size_t common_dir_prefix_length(nonstd::string_view dir,
-                                nonstd::string_view path);
+size_t common_dir_prefix_length(std::string_view dir, std::string_view path);
 
 // Copy all data from `fd_in` to `fd_out`. Throws `core::Error` on error.
 void copy_fd(int fd_in, int fd_out);
@@ -121,13 +110,13 @@ void copy_file(const std::string& src,
 // Create a directory if needed, including its parents if needed.
 //
 // Returns true if the directory exists or could be created, otherwise false.
-bool create_dir(nonstd::string_view dir);
+bool create_dir(std::string_view dir);
 
 // Get directory name of path.
-nonstd::string_view dir_name(nonstd::string_view path);
+std::string_view dir_name(std::string_view path);
 
 // Like create_dir but throws Fatal on error.
-void ensure_dir_exists(nonstd::string_view dir);
+void ensure_dir_exists(std::string_view dir);
 
 // Expand all instances of $VAR or ${VAR}, where VAR is an environment variable,
 // in `str`. Throws `core::Error` if one of the environment variables.
@@ -154,12 +143,6 @@ std::string format_base16(const uint8_t* data, size_t size);
 // padding characters will be added.
 std::string format_base32hex(const uint8_t* data, size_t size);
 
-// Format `size` as a human-readable string.
-std::string format_human_readable_size(uint64_t size);
-
-// Format `size` as a parsable string.
-std::string format_parsable_size_with_suffix(uint64_t size);
-
 // Return current working directory (CWD) as returned from getcwd(3) (i.e.,
 // normalized path without symlink parts). Returns the empty string on error.
 std::string get_actual_cwd();
@@ -172,7 +155,7 @@ std::string get_apparent_cwd(const std::string& actual_cwd);
 
 // Return the file extension (including the dot) as a view into `path`. If
 // `path` has no file extension, an empty string_view is returned.
-nonstd::string_view get_extension(nonstd::string_view path);
+std::string_view get_extension(std::string_view path);
 
 // Return the current user's home directory, or throw `Fatal` if it can't
 // be determined.
@@ -185,8 +168,10 @@ const char* get_hostname();
 // `path` (an absolute path). Assumes that both `dir` and `path` are normalized.
 // The algorithm does *not* follow symlinks, so the result may not actually
 // resolve to the same file as `path`.
-std::string get_relative_path(nonstd::string_view dir,
-                              nonstd::string_view path);
+std::string get_relative_path(std::string_view dir, std::string_view path);
+
+// Get process umask.
+mode_t get_umask();
 
 // Hard-link `oldpath` to `newpath`. Throws `core::Error` on error.
 void hard_link(const std::string& oldpath, const std::string& newpath);
@@ -220,13 +205,12 @@ int_to_big_endian(int8_t value, uint8_t* buffer)
   buffer[0] = value;
 }
 
-// Test if a file is on nfs.
-//
-// Sets is_nfs to the result if fstatfs is available and no error occurred.
-//
-// Returns 0 if is_nfs was set, -1 if fstatfs is not available or errno if an
-// error occurred.
-int is_nfs_fd(int fd, bool* is_nfs);
+// Determine if `path` is an absolute path with prefix, returning the split
+// point.
+std::optional<size_t> is_absolute_path_with_prefix(std::string_view path);
+
+// Detmine if `path` refers to a ccache executable.
+bool is_ccache_executable(std::string_view path);
 
 // Return whether `ch` is a directory separator, i.e. '/' on POSIX systems and
 // '/' or '\\' on Windows systems.
@@ -242,56 +226,56 @@ is_dir_separator(char ch)
 
 // Return whether `path` represents a precompiled header (see "Precompiled
 // Headers" in GCC docs).
-bool is_precompiled_header(nonstd::string_view path);
+bool is_precompiled_header(std::string_view path);
 
 // Thread-safe version of `localtime(3)`. If `time` is not specified the current
 // time of day is used.
-nonstd::optional<tm> localtime(nonstd::optional<time_t> time = {});
+std::optional<tm> localtime(std::optional<util::TimePoint> time = {});
+
+// Construct a normalized native path.
+//
+// Example:
+//
+//   std::string path = Util::make_path("usr", "local", "bin");
+template<typename... T>
+std::string
+make_path(const T&... args)
+{
+  return (std::filesystem::path{} / ... / args).lexically_normal().string();
+}
 
 // Make a relative path from current working directory (either `actual_cwd` or
 // `apparent_cwd`) to `path` if `path` is under `base_dir`.
 std::string make_relative_path(const std::string& base_dir,
                                const std::string& actual_cwd,
                                const std::string& apparent_cwd,
-                               nonstd::string_view path);
+                               std::string_view path);
 
 // Like above but with base directory and apparent/actual CWD taken from `ctx`.
-std::string make_relative_path(const Context& ctx, nonstd::string_view path);
+std::string make_relative_path(const Context& ctx, std::string_view path);
 
 // Return whether `path` is equal to `dir_prefix_or_file` or if
 // `dir_prefix_or_file` is a directory prefix of `path`.
-bool matches_dir_prefix_or_file(nonstd::string_view dir_prefix_or_file,
-                                nonstd::string_view path);
+bool matches_dir_prefix_or_file(std::string_view dir_prefix_or_file,
+                                std::string_view path);
 
 // Normalize absolute path `path`, not taking symlinks into account.
 //
 // Normalization here means syntactically removing redundant slashes and
 // resolving "." and ".." parts. The algorithm does however *not* follow
-// symlinks, so the result may not actually resolve to `path`.
+// symlinks, so the result may not actually resolve to the same filesystem entry
+// as `path` (nor to any existing file system entry for that matter).
 //
 // On Windows: Backslashes are replaced with forward slashes.
-std::string normalize_absolute_path(nonstd::string_view path);
+std::string normalize_abstract_absolute_path(std::string_view path);
+
+// Like normalize_abstract_absolute_path, but returns `path` unchanged if the
+// normalized result doesn't resolve to the same file system entry as `path`.
+std::string normalize_concrete_absolute_path(const std::string& path);
 
 // Parse `duration`, an unsigned integer with d (days) or s (seconds) suffix,
 // into seconds. Throws `core::Error` on error.
-uint64_t parse_duration(const std::string& duration);
-
-// Parse a "size value", i.e. a string that can end in k, M, G, T (10-based
-// suffixes) or Ki, Mi, Gi, Ti (2-based suffixes). For backward compatibility, K
-// is also recognized as a synonym of k. Throws `core::Error` on parse error.
-uint64_t parse_size(const std::string& value);
-
-// Read data from `fd` until end of file and call `data_receiver` with the read
-// data. Returns whether reading was successful, i.e. whether the read(2) call
-// did not return -1.
-bool read_fd(int fd, DataReceiver data_receiver);
-
-// Return `path`'s content as a string. If `size_hint` is not 0 then assume that
-// `path` has this size (this saves system calls).
-//
-// Throws `core::Error` on error. The description contains the error message
-// without the path.
-std::string read_file(const std::string& path, size_t size_hint = 0);
+uint64_t parse_duration(std::string_view duration);
 
 #ifndef _WIN32
 // Like readlink(2) but returns the string (or the empty string on failure).
@@ -306,26 +290,23 @@ std::string real_path(const std::string& path,
 
 // Return a view into `path` containing the given path without the filename
 // extension as determined by `get_extension()`.
-nonstd::string_view remove_extension(nonstd::string_view path);
+std::string_view remove_extension(std::string_view path);
 
 // Rename `oldpath` to `newpath` (deleting `newpath`). Throws `core::Error` on
 // error.
 void rename(const std::string& oldpath, const std::string& newpath);
 
-// Detmine if `program_name` is equal to `canonical_program_name`. On Windows,
-// this means performing a case insensitive equality check with and without a
-// ".exe" suffix. On non-Windows, it is a simple equality check.
-bool same_program_name(nonstd::string_view program_name,
-                       nonstd::string_view canonical_program_name);
-
-// Send `text` to STDERR_FILENO, optionally stripping ANSI color sequences if
-// `ctx.args_info.strip_diagnostics_colors` is true and rewriting paths to
-// absolute if `ctx.config.absolute_paths_in_stderr` is true. Throws
+// Send `text` to file descriptor `fd`, optionally stripping ANSI color
+// sequences if `ctx.args_info.strip_diagnostics_colors` is true and rewriting
+// paths to absolute if `ctx.config.absolute_paths_in_stderr` is true. Throws
 // `core::Error` on error.
-void send_to_stderr(const Context& ctx, const std::string& text);
+void send_to_fd(const Context& ctx, std::string_view text, int fd);
 
 // Set the FD_CLOEXEC on file descriptor `fd`. This is a NOP on Windows.
 void set_cloexec_flag(int fd);
+
+// Set process umask. Returns the previous mask.
+mode_t set_umask(mode_t mask);
 
 // Set environment variable `name` to `value`.
 void setenv(const std::string& name, const std::string& value);
@@ -342,22 +323,26 @@ size_change_kibibyte(const Stat& old_stat, const Stat& new_stat)
 // Split `string` into tokens at any of the characters in `separators`. These
 // tokens are views into `string`. `separators` must neither be the empty string
 // nor a nullptr.
-std::vector<nonstd::string_view> split_into_views(
-  nonstd::string_view string,
-  const char* separators,
-  util::Tokenizer::Mode mode = util::Tokenizer::Mode::skip_empty);
+std::vector<std::string_view>
+split_into_views(std::string_view string,
+                 const char* separators,
+                 util::Tokenizer::Mode mode = util::Tokenizer::Mode::skip_empty,
+                 util::Tokenizer::IncludeDelimiter include_delimiter =
+                   util::Tokenizer::IncludeDelimiter::no);
 
 // Same as `split_into_views` but the tokens are copied from `string`.
 std::vector<std::string> split_into_strings(
-  nonstd::string_view string,
+  std::string_view string,
   const char* separators,
-  util::Tokenizer::Mode mode = util::Tokenizer::Mode::skip_empty);
+  util::Tokenizer::Mode mode = util::Tokenizer::Mode::skip_empty,
+  util::Tokenizer::IncludeDelimiter include_delimiter =
+    util::Tokenizer::IncludeDelimiter::no);
 
 // Returns a copy of string with the specified ANSI CSI sequences removed.
-[[nodiscard]] std::string strip_ansi_csi_seqs(nonstd::string_view string);
+[[nodiscard]] std::string strip_ansi_csi_seqs(std::string_view string);
 
 // Convert a string to lowercase.
-[[nodiscard]] std::string to_lowercase(nonstd::string_view string);
+[[nodiscard]] std::string to_lowercase(std::string_view string);
 
 // Traverse `path` recursively (postorder, i.e. files are visited before their
 // parent directory).
@@ -383,26 +368,10 @@ bool unlink_tmp(const std::string& path,
 // Unset environment variable `name`.
 void unsetenv(const std::string& name);
 
-// Set mtime of `path` to the current timestamp.
-void update_mtime(const std::string& path);
-
 // Remove `path` (and its contents if it's a directory). A nonexistent path is
 // not considered an error.
 //
 // Throws core::Error on error.
 void wipe_path(const std::string& path);
-
-// Write `size` bytes from `data` to `fd`. Throws `core::Error` on error.
-void write_fd(int fd, const void* data, size_t size);
-
-// Write `data` to `path`. The file will be opened according to `open_mode`,
-// which always will include `std::ios::out` even if not specified at the call
-// site.
-//
-// Throws `core::Error` on error. The description contains the error message
-// without the path.
-void write_file(const std::string& path,
-                const std::string& data,
-                std::ios_base::openmode open_mode = std::ios::binary);
 
 } // namespace Util

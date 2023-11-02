@@ -1,5 +1,5 @@
 // Copyright (C) 2002 Andrew Tridgell
-// Copyright (C) 2009-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2009-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -35,17 +35,12 @@
 #ifdef HAVE_SYSLOG_H
 #  include <syslog.h>
 #endif
-#ifdef HAVE_SYS_TIME_H
-#  include <sys/time.h>
-#endif
 
 #ifdef __linux__
 #  ifdef HAVE_SYS_IOCTL_H
 #    include <sys/ioctl.h>
 #  endif
 #endif
-
-using nonstd::string_view;
 
 namespace {
 
@@ -68,36 +63,39 @@ bool debug_log_enabled = false;
 print_fatal_error_and_exit()
 {
   // Note: Can't throw Fatal since that would lead to recursion.
-  PRINT(stderr,
-        "ccache: error: Failed to write to {}: {}\n",
-        logfile_path,
-        strerror(errno));
+  try {
+    PRINT(stderr,
+          "ccache: error: Failed to write to {}: {}\n",
+          logfile_path,
+          strerror(errno));
+  } catch (std::runtime_error&) {
+    // Ignore since we can't do anything about it.
+  }
   exit(EXIT_FAILURE);
 }
 
 void
-do_log(string_view message, bool bulk)
+do_log(std::string_view message, bool bulk)
 {
   static char prefix[200];
 
   if (!bulk) {
     char timestamp[100];
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    auto tm = Util::localtime(tv.tv_sec);
+    auto now = util::TimePoint::now();
+    auto tm = Util::localtime(now);
     if (tm) {
       strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", &*tm);
     } else {
       snprintf(timestamp,
                sizeof(timestamp),
                "%llu",
-               static_cast<long long unsigned int>(tv.tv_sec));
+               static_cast<long long unsigned int>(now.sec()));
     }
     snprintf(prefix,
              sizeof(prefix),
              "[%s.%06d %-5d] ",
              timestamp,
-             static_cast<int>(tv.tv_usec),
+             static_cast<unsigned int>(now.nsec_decimal_part() / 1000),
              static_cast<int>(getpid()));
   }
 
@@ -159,7 +157,7 @@ enabled()
 }
 
 void
-log(string_view message)
+log(std::string_view message)
 {
   if (!enabled()) {
     return;
@@ -168,7 +166,7 @@ log(string_view message)
 }
 
 void
-bulk_log(string_view message)
+bulk_log(std::string_view message)
 {
   if (!enabled()) {
     return;

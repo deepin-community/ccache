@@ -22,7 +22,8 @@
 # CCACHE_VERSION_ORIGIN is set to "archive" in scenario 1 and "git" in scenario
 # 3.
 
-set(version_info "6eedb905a1a21fc8a6399b030312def2c510560c HEAD, tag: v4.5, origin/master, origin/HEAD, master")
+set(version_info "044558e647b49dbc8fc89b810a7d22f526101e6b HEAD, tag: v4.8.3, origin/HEAD, origin/4.8-maint, 4.8-maint")
+set(CCACHE_VERSION "unknown")
 
 if(version_info MATCHES "^([0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])[0-9a-f]* (.*)")
   # Scenario 1.
@@ -43,17 +44,17 @@ elseif(EXISTS "${CMAKE_SOURCE_DIR}/.git")
 
   find_package(Git QUIET)
   if(NOT GIT_FOUND)
-    set(CCACHE_VERSION "unknown")
     message(WARNING "Could not find git")
   else()
     macro(git)
       execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" ${ARGN}
+        COMMAND "${GIT_EXECUTABLE}" ${ARGN}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         OUTPUT_VARIABLE git_stdout OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_VARIABLE git_stderr ERROR_STRIP_TRAILING_WHITESPACE)
     endmacro()
 
-    git(describe --abbrev=8 --dirty)
+    git(describe --tags --abbrev=8 --dirty)
     if(git_stdout MATCHES "^v([^-]+)(-dirty)?$")
       set(CCACHE_VERSION "${CMAKE_MATCH_1}")
       if(NOT "${CMAKE_MATCH_2}" STREQUAL "")
@@ -72,9 +73,9 @@ elseif(EXISTS "${CMAKE_SOURCE_DIR}/.git")
   endif()
 endif()
 
-if(CCACHE_VERSION STREQUAL "")
+if("${CCACHE_VERSION}" STREQUAL "unknown")
   # Scenario 2 or unexpected error.
-  message(SEND_ERROR "Cannot determine Ccache version")
+  message(WARNING "Could not determine ccache version")
 endif()
 
 message(STATUS "Ccache version: ${CCACHE_VERSION}")

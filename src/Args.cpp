@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -20,12 +20,10 @@
 
 #include "Util.hpp"
 
+#include <Logging.hpp>
 #include <core/exceptions.hpp>
+#include <util/file.hpp>
 #include <util/string.hpp>
-
-using nonstd::nullopt;
-using nonstd::optional;
-using nonstd::string_view;
 
 Args::Args(Args&& other) noexcept : m_args(std::move(other.m_args))
 {
@@ -40,7 +38,7 @@ Args::from_argv(int argc, const char* const* argv)
 }
 
 Args
-Args::from_string(const std::string& command)
+Args::from_string(std::string_view command)
 {
   Args args;
   for (const std::string& word : Util::split_into_strings(command, " \t\r\n")) {
@@ -49,21 +47,20 @@ Args::from_string(const std::string& command)
   return args;
 }
 
-optional<Args>
-Args::from_gcc_atfile(const std::string& filename)
+std::optional<Args>
+Args::from_atfile(const std::string& filename, AtFileFormat format)
 {
-  std::string argtext;
-  try {
-    argtext = Util::read_file(filename);
-  } catch (core::Error&) {
-    return nullopt;
+  const auto argtext = util::read_file<std::string>(filename);
+  if (!argtext) {
+    LOG("Failed to read atfile {}: {}", filename, argtext.error());
+    return std::nullopt;
   }
 
   Args args;
-  auto pos = argtext.c_str();
+  auto pos = argtext->c_str();
   std::string argbuf;
-  argbuf.resize(argtext.length() + 1);
-  auto argpos = argbuf.begin();
+  argbuf.resize(argtext->length() + 1);
+  auto argpos = argbuf.data();
 
   // Used to track quoting state; if \0 we are not inside quotes. Otherwise
   // stores the quoting character that started it for matching the end quote.
@@ -72,18 +69,62 @@ Args::from_gcc_atfile(const std::string& filename)
   while (true) {
     switch (*pos) {
     case '\\':
-      pos++;
-      if (*pos == '\0') {
+      switch (format) {
+      case AtFileFormat::gcc:
+        pos++;
+        if (*pos == '\0') {
+          continue;
+        }
+        break;
+      case AtFileFormat::msvc:
+        size_t count = 0;
+        while (*pos == '\\') {
+          count++;
+          pos++;
+        }
+        if (*pos == '"') {
+          if (count == 1) {
+            // simple escape \"
+            break;
+          }
+          if (count % 2 != 0) {
+            // If an odd number of backslashes is followed by a double quotation
+            // mark, one backslash is placed in the argv array for every pair of
+            // backslashes, and the double quotation mark is "escaped" by the
+            // remaining backslash
+            pos--;
+          }
+          std::memset(argpos, '\\', count / 2);
+          argpos += count / 2;
+        } else {
+          // Backslashes are interpreted literally, unless they immediately
+          // precede a double quotation mark.
+          std::memset(argpos, '\\', count);
+          argpos += count;
+        }
         continue;
+        break;
       }
       break;
 
-    case '"':
     case '\'':
+      if (format == AtFileFormat::msvc) {
+        break;
+      }
+      [[fallthrough]];
+
+    case '"':
       if (quoting != '\0') {
         if (quoting == *pos) {
           quoting = '\0';
           pos++;
+          if (format == AtFileFormat::msvc && *pos == '"') {
+            // Any double-quote directly following a closing quote is treated as
+            // (or as part of) plain unwrapped text that is adjacent to the
+            // double-quoted group
+            // https://stackoverflow.com/questions/7760545/escape-double-quotes-in-parameter
+            break;
+          }
           continue;
         } else {
           break;
@@ -101,7 +142,7 @@ Args::from_gcc_atfile(const std::string& filename)
       if (quoting) {
         break;
       }
-      // Fall through.
+      [[fallthrough]];
 
     case '\0':
       // End of token
@@ -109,7 +150,7 @@ Args::from_gcc_atfile(const std::string& filename)
       if (argbuf[0] != '\0') {
         args.push_back(argbuf.substr(0, argbuf.find('\0')));
       }
-      argpos = argbuf.begin();
+      argpos = argbuf.data();
       if (*pos == '\0') {
         return args;
       } else {
@@ -159,7 +200,7 @@ Args::to_string() const
 }
 
 void
-Args::erase_last(string_view arg)
+Args::erase_last(std::string_view arg)
 {
   const auto it = std::find(m_args.rbegin(), m_args.rend(), arg);
   if (it != m_args.rend()) {
@@ -168,7 +209,7 @@ Args::erase_last(string_view arg)
 }
 
 void
-Args::erase_with_prefix(string_view prefix)
+Args::erase_with_prefix(std::string_view prefix)
 {
   m_args.erase(std::remove_if(m_args.begin(),
                               m_args.end(),

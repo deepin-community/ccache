@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -24,11 +24,13 @@
 
 #include <core/exceptions.hpp>
 #include <core/wincompat.hpp>
+#include <util/file.hpp>
 
 #include "third_party/doctest.h"
-#include "third_party/nonstd/optional.hpp"
 
 #include <fcntl.h>
+
+#include <optional>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -36,8 +38,6 @@
 
 #include <algorithm>
 
-using doctest::Approx;
-using nonstd::nullopt;
 using TestUtil::TestContext;
 
 TEST_SUITE_BEGIN("Util");
@@ -104,18 +104,6 @@ TEST_CASE("Util::change_extension")
   CHECK(Util::change_extension("foo.bar.txt", ".o") == "foo.bar.o");
 }
 
-TEST_CASE("Util::clamp")
-{
-  CHECK(Util::clamp(0, 1, 2) == 1);
-  CHECK(Util::clamp(1, 1, 2) == 1);
-  CHECK(Util::clamp(2, 1, 2) == 2);
-  CHECK(Util::clamp(3, 1, 2) == 2);
-
-  CHECK(Util::clamp(7.0, 7.7, 8.8) == Approx(7.7));
-  CHECK(Util::clamp(8.0, 7.7, 8.8) == Approx(8.0));
-  CHECK(Util::clamp(9.0, 7.7, 8.8) == Approx(8.8));
-}
-
 TEST_CASE("Util::common_dir_prefix_length")
 {
   CHECK(Util::common_dir_prefix_length("", "") == 0);
@@ -143,7 +131,7 @@ TEST_CASE("Util::create_dir")
   CHECK(Util::create_dir("create/dir"));
   CHECK(Stat::stat("create/dir").is_directory());
 
-  Util::write_file("create/dir/file", "");
+  util::write_file("create/dir/file", "");
   CHECK(!Util::create_dir("create/dir/file"));
 }
 
@@ -187,7 +175,7 @@ TEST_CASE("Util::ensure_dir_exists")
   CHECK_NOTHROW(Util::ensure_dir_exists("create/dir"));
   CHECK(Stat::stat("create/dir").is_directory());
 
-  Util::write_file("create/dir/file", "");
+  util::write_file("create/dir/file", "");
   CHECK_THROWS_WITH(
     Util::ensure_dir_exists("create/dir/file"),
     "Failed to create directory create/dir/file: Not a directory");
@@ -268,36 +256,6 @@ TEST_CASE("Util::format_base32hex")
   CHECK(Util::format_base32hex(input, 6) == "cpnmuoj1e8");
 }
 
-TEST_CASE("Util::format_human_readable_size")
-{
-  CHECK(Util::format_human_readable_size(0) == "0.0 kB");
-  CHECK(Util::format_human_readable_size(1) == "0.0 kB");
-  CHECK(Util::format_human_readable_size(49) == "0.0 kB");
-  CHECK(Util::format_human_readable_size(51) == "0.1 kB");
-  CHECK(Util::format_human_readable_size(949) == "0.9 kB");
-  CHECK(Util::format_human_readable_size(951) == "1.0 kB");
-  CHECK(Util::format_human_readable_size(499.7 * 1000) == "499.7 kB");
-  CHECK(Util::format_human_readable_size(1000 * 1000) == "1.0 MB");
-  CHECK(Util::format_human_readable_size(1234 * 1000) == "1.2 MB");
-  CHECK(Util::format_human_readable_size(438.5 * 1000 * 1000) == "438.5 MB");
-  CHECK(Util::format_human_readable_size(1000 * 1000 * 1000) == "1.0 GB");
-  CHECK(Util::format_human_readable_size(17.11 * 1000 * 1000 * 1000)
-        == "17.1 GB");
-}
-
-TEST_CASE("Util::format_parsable_size_with_suffix")
-{
-  CHECK(Util::format_parsable_size_with_suffix(0) == "0");
-  CHECK(Util::format_parsable_size_with_suffix(42 * 1000) == "42000");
-  CHECK(Util::format_parsable_size_with_suffix(1000 * 1000) == "1.0M");
-  CHECK(Util::format_parsable_size_with_suffix(1234 * 1000) == "1.2M");
-  CHECK(Util::format_parsable_size_with_suffix(438.5 * 1000 * 1000)
-        == "438.5M");
-  CHECK(Util::format_parsable_size_with_suffix(1000 * 1000 * 1000) == "1.0G");
-  CHECK(Util::format_parsable_size_with_suffix(17.11 * 1000 * 1000 * 1000)
-        == "17.1G");
-}
-
 TEST_CASE("Util::get_extension")
 {
   CHECK(Util::get_extension("") == "");
@@ -358,17 +316,17 @@ TEST_CASE("Util::hard_link")
 
   SUBCASE("Link file to nonexistent destination")
   {
-    Util::write_file("old", "content");
+    util::write_file("old", "content");
     CHECK_NOTHROW(Util::hard_link("old", "new"));
-    CHECK(Util::read_file("new") == "content");
+    CHECK(*util::read_file<std::string>("new") == "content");
   }
 
   SUBCASE("Link file to existing destination")
   {
-    Util::write_file("old", "content");
-    Util::write_file("new", "other content");
+    util::write_file("old", "content");
+    util::write_file("new", "other content");
     CHECK_NOTHROW(Util::hard_link("old", "new"));
-    CHECK(Util::read_file("new") == "content");
+    CHECK(*util::read_file<std::string>("new") == "content");
   }
 
   SUBCASE("Link nonexistent file")
@@ -436,6 +394,35 @@ TEST_CASE("Util::int_to_big_endian")
   CHECK(bytes[7] == 0xca);
 }
 
+TEST_CASE("Util::is_absolute_path_with_prefix")
+{
+  CHECK(*Util::is_absolute_path_with_prefix("-I/c/foo") == 2);
+  CHECK(*Util::is_absolute_path_with_prefix("-W,path/c/foo") == 7);
+  CHECK(!Util::is_absolute_path_with_prefix("-DMACRO"));
+#ifdef _WIN32
+  CHECK(*Util::is_absolute_path_with_prefix("-I/C:/foo") == 2);
+  CHECK(*Util::is_absolute_path_with_prefix("-IC:/foo") == 2);
+  CHECK(*Util::is_absolute_path_with_prefix("-W,path/c:/foo") == 7);
+  CHECK(*Util::is_absolute_path_with_prefix("-W,pathc:/foo") == 7);
+  CHECK(!Util::is_absolute_path_with_prefix("-opt:value"));
+#endif
+}
+
+TEST_CASE("Util::is_ccache_executable")
+{
+  CHECK(Util::is_ccache_executable("ccache"));
+  CHECK(Util::is_ccache_executable("ccache-1.2.3"));
+  CHECK(!Util::is_ccache_executable("fooccache"));
+  CHECK(!Util::is_ccache_executable("gcc"));
+#ifdef _WIN32
+  CHECK(Util::is_ccache_executable("CCACHE"));
+  CHECK(Util::is_ccache_executable("CCACHE.exe"));
+  CHECK(Util::is_ccache_executable("CCACHE-1.2.3"));
+  CHECK(Util::is_ccache_executable("CCACHE.EXE"));
+  CHECK(Util::is_ccache_executable("CCACHE-1.2.3.EXE"));
+#endif
+}
+
 TEST_CASE("Util::is_dir_separator")
 {
   CHECK(!Util::is_dir_separator('x'));
@@ -489,6 +476,14 @@ TEST_CASE("Util::make_relative_path")
       make_relative_path(
         actual_cwd.substr(0, 3), actual_cwd, apparent_cwd, actual_cwd + "/x")
       == "./x");
+    CHECK(
+      make_relative_path(
+        actual_cwd.substr(0, 3), actual_cwd, apparent_cwd, actual_cwd + "\\x")
+      == ".\\x");
+    CHECK(
+      make_relative_path(
+        actual_cwd.substr(0, 3), actual_cwd, apparent_cwd, actual_cwd + "\\\\x")
+      == ".\\x");
 #else
     CHECK(make_relative_path("/", actual_cwd, apparent_cwd, actual_cwd + "/x")
           == "./x");
@@ -539,33 +534,53 @@ TEST_CASE("Util::matches_dir_prefix_or_file")
 #endif
 }
 
-TEST_CASE("Util::normalize_absolute_path")
+TEST_CASE("Util::normalize_abstract_absolute_path")
 {
-  CHECK(Util::normalize_absolute_path("") == "");
-  CHECK(Util::normalize_absolute_path(".") == ".");
-  CHECK(Util::normalize_absolute_path("..") == "..");
-  CHECK(Util::normalize_absolute_path("...") == "...");
-  CHECK(Util::normalize_absolute_path("x/./") == "x/./");
+  CHECK(Util::normalize_abstract_absolute_path("") == "");
+  CHECK(Util::normalize_abstract_absolute_path(".") == ".");
+  CHECK(Util::normalize_abstract_absolute_path("..") == "..");
+  CHECK(Util::normalize_abstract_absolute_path("...") == "...");
+  CHECK(Util::normalize_abstract_absolute_path("x/./") == "x/./");
 
 #ifdef _WIN32
-  CHECK(Util::normalize_absolute_path("c:/") == "c:/");
-  CHECK(Util::normalize_absolute_path("c:\\") == "c:/");
-  CHECK(Util::normalize_absolute_path("c:/.") == "c:/");
-  CHECK(Util::normalize_absolute_path("c:\\..") == "c:/");
-  CHECK(Util::normalize_absolute_path("c:\\x/..") == "c:/");
-  CHECK(Util::normalize_absolute_path("c:\\x/./y\\..\\\\z") == "c:/x/z");
+  CHECK(Util::normalize_abstract_absolute_path("c:/") == "c:/");
+  CHECK(Util::normalize_abstract_absolute_path("c:\\") == "c:/");
+  CHECK(Util::normalize_abstract_absolute_path("c:/.") == "c:/");
+  CHECK(Util::normalize_abstract_absolute_path("c:\\..") == "c:/");
+  CHECK(Util::normalize_abstract_absolute_path("c:\\x/..") == "c:/");
+  CHECK(Util::normalize_abstract_absolute_path("c:\\x/./y\\..\\\\z")
+        == "c:/x/z");
 #else
-  CHECK(Util::normalize_absolute_path("/") == "/");
-  CHECK(Util::normalize_absolute_path("/.") == "/");
-  CHECK(Util::normalize_absolute_path("/..") == "/");
-  CHECK(Util::normalize_absolute_path("/./") == "/");
-  CHECK(Util::normalize_absolute_path("//") == "/");
-  CHECK(Util::normalize_absolute_path("/../x") == "/x");
-  CHECK(Util::normalize_absolute_path("/x/./y/z") == "/x/y/z");
-  CHECK(Util::normalize_absolute_path("/x/../y/z/") == "/y/z");
-  CHECK(Util::normalize_absolute_path("/x/.../y/z") == "/x/.../y/z");
-  CHECK(Util::normalize_absolute_path("/x/yyy/../zz") == "/x/zz");
-  CHECK(Util::normalize_absolute_path("//x/yyy///.././zz") == "/x/zz");
+  CHECK(Util::normalize_abstract_absolute_path("/") == "/");
+  CHECK(Util::normalize_abstract_absolute_path("/.") == "/");
+  CHECK(Util::normalize_abstract_absolute_path("/..") == "/");
+  CHECK(Util::normalize_abstract_absolute_path("/./") == "/");
+  CHECK(Util::normalize_abstract_absolute_path("//") == "/");
+  CHECK(Util::normalize_abstract_absolute_path("/../x") == "/x");
+  CHECK(Util::normalize_abstract_absolute_path("/x/./y/z") == "/x/y/z");
+  CHECK(Util::normalize_abstract_absolute_path("/x/../y/z/") == "/y/z");
+  CHECK(Util::normalize_abstract_absolute_path("/x/.../y/z") == "/x/.../y/z");
+  CHECK(Util::normalize_abstract_absolute_path("/x/yyy/../zz") == "/x/zz");
+  CHECK(Util::normalize_abstract_absolute_path("//x/yyy///.././zz") == "/x/zz");
+#endif
+}
+
+TEST_CASE("Util::normalize_concrete_absolute_path")
+{
+#ifndef _WIN32
+  TestContext test_context;
+
+  util::write_file("file", "");
+  REQUIRE(Util::create_dir("dir1/dir2"));
+  REQUIRE(symlink("dir1/dir2", "symlink") == 0);
+  const auto cwd = Util::get_actual_cwd();
+
+  CHECK(Util::normalize_concrete_absolute_path(FMT("{}/file", cwd))
+        == FMT("{}/file", cwd));
+  CHECK(Util::normalize_concrete_absolute_path(FMT("{}/dir1/../file", cwd))
+        == FMT("{}/file", cwd));
+  CHECK(Util::normalize_concrete_absolute_path(FMT("{}/symlink/../file", cwd))
+        == FMT("{}/symlink/../file", cwd));
 #endif
 }
 
@@ -586,71 +601,6 @@ TEST_CASE("Util::parse_duration")
     "invalid suffix (supported: d (day) and s (second)): \"2\"");
 }
 
-TEST_CASE("Util::parse_size")
-{
-  CHECK(Util::parse_size("0") == 0);
-  CHECK(Util::parse_size("42") // Default suffix: G
-        == static_cast<uint64_t>(42) * 1000 * 1000 * 1000);
-  CHECK(Util::parse_size("78k") == 78 * 1000);
-  CHECK(Util::parse_size("78K") == 78 * 1000);
-  CHECK(Util::parse_size("1.1 M") == (int64_t(1.1 * 1000 * 1000)));
-  CHECK(Util::parse_size("438.55M") == (int64_t(438.55 * 1000 * 1000)));
-  CHECK(Util::parse_size("1 G") == 1 * 1000 * 1000 * 1000);
-  CHECK(Util::parse_size("2T")
-        == static_cast<uint64_t>(2) * 1000 * 1000 * 1000 * 1000);
-  CHECK(Util::parse_size("78 Ki") == 78 * 1024);
-  CHECK(Util::parse_size("1.1Mi") == (int64_t(1.1 * 1024 * 1024)));
-  CHECK(Util::parse_size("438.55 Mi") == (int64_t(438.55 * 1024 * 1024)));
-  CHECK(Util::parse_size("1Gi") == 1 * 1024 * 1024 * 1024);
-  CHECK(Util::parse_size("2 Ti")
-        == static_cast<uint64_t>(2) * 1024 * 1024 * 1024 * 1024);
-
-  CHECK_THROWS_WITH(Util::parse_size(""), "invalid size: \"\"");
-  CHECK_THROWS_WITH(Util::parse_size("x"), "invalid size: \"x\"");
-  CHECK_THROWS_WITH(Util::parse_size("10x"), "invalid size: \"10x\"");
-}
-
-TEST_CASE("Util::read_file and Util::write_file")
-{
-  TestContext test_context;
-
-  Util::write_file("test", "foo\nbar\n");
-  std::string data = Util::read_file("test");
-  CHECK(data == "foo\nbar\n");
-
-  Util::write_file("test", "car");
-  data = Util::read_file("test");
-  CHECK(data == "car");
-
-  Util::write_file("test", "pet", std::ios::app);
-  data = Util::read_file("test");
-  CHECK(data == "carpet");
-
-  Util::write_file("test", "\n", std::ios::app | std::ios::binary);
-  data = Util::read_file("test");
-  CHECK(data == "carpet\n");
-
-  Util::write_file("test", "\n", std::ios::app); // text mode
-  data = Util::read_file("test");
-#ifdef _WIN32
-  CHECK(data == "carpet\n\r\n");
-#else
-  CHECK(data == "carpet\n\n");
-#endif
-
-  Util::write_file("size_hint_test", std::string(8192, '\0'));
-  CHECK(Util::read_file("size_hint_test", 4096 /*size_hint*/).size() == 8192);
-
-  CHECK_THROWS_WITH(Util::read_file("does/not/exist"),
-                    "No such file or directory");
-
-  CHECK_THROWS_WITH(Util::write_file("", "does/not/exist"),
-                    "No such file or directory");
-
-  CHECK_THROWS_WITH(Util::write_file("does/not/exist", "does/not/exist"),
-                    "No such file or directory");
-}
-
 TEST_CASE("Util::remove_extension")
 {
   CHECK(Util::remove_extension("") == "");
@@ -664,18 +614,6 @@ TEST_CASE("Util::remove_extension")
   CHECK(Util::remove_extension("f.abc.txt") == "f.abc");
   CHECK(Util::remove_extension("/foo/bar/f.txt") == "/foo/bar/f");
   CHECK(Util::remove_extension("/foo/bar/f.abc.txt") == "/foo/bar/f.abc");
-}
-
-TEST_CASE("Util::same_program_name")
-{
-  CHECK(Util::same_program_name("foo", "foo"));
-#ifdef _WIN32
-  CHECK(Util::same_program_name("FOO", "foo"));
-  CHECK(Util::same_program_name("FOO.exe", "foo"));
-#else
-  CHECK(!Util::same_program_name("FOO", "foo"));
-  CHECK(!Util::same_program_name("FOO.exe", "foo"));
-#endif
 }
 
 // Util::split_into_strings and Util::split_into_views are tested implicitly in
@@ -694,10 +632,10 @@ TEST_CASE("Util::traverse")
   TestContext test_context;
 
   REQUIRE(Util::create_dir("dir-with-subdir-and-file/subdir"));
-  Util::write_file("dir-with-subdir-and-file/subdir/f", "");
+  util::write_file("dir-with-subdir-and-file/subdir/f", "");
   REQUIRE(Util::create_dir("dir-with-files"));
-  Util::write_file("dir-with-files/f1", "");
-  Util::write_file("dir-with-files/f2", "");
+  util::write_file("dir-with-files/f1", "");
+  util::write_file("dir-with-files/f2", "");
   REQUIRE(Util::create_dir("empty-dir"));
 
   std::vector<std::string> visited;
@@ -758,7 +696,7 @@ TEST_CASE("Util::wipe_path")
 
   SUBCASE("Wipe file")
   {
-    Util::write_file("a", "");
+    util::write_file("a", "");
     CHECK_NOTHROW(Util::wipe_path("a"));
     CHECK(!Stat::stat("a"));
   }
@@ -766,8 +704,8 @@ TEST_CASE("Util::wipe_path")
   SUBCASE("Wipe directory")
   {
     REQUIRE(Util::create_dir("a/b"));
-    Util::write_file("a/1", "");
-    Util::write_file("a/b/1", "");
+    util::write_file("a/1", "");
+    util::write_file("a/b/1", "");
     CHECK_NOTHROW(Util::wipe_path("a"));
     CHECK(!Stat::stat("a"));
   }

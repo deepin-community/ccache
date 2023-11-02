@@ -5,14 +5,14 @@ Source: https://github.com/ccache/ccache/releases
 
 Files: *
 Copyright: 2002-2007 Andrew Tridgell <tridge@samba.org>
-           2009-2021 Joel Rosdahl <joel@rosdahl.net>
+           2009-2022 Joel Rosdahl <joel@rosdahl.net>
 License: GPL-3+
 
 Files: debian/*
 Copyright: 2002-2003 Paul Russell <prussell@debian.org>
            2004-2009 Francois Marier <francois@debian.org>
            2009-2010 Y Giridhar Appaji Nag <appaji@debian.org>
-           2010-2021 Joel Rosdahl <joel@debian.org>
+           2010-2022 Joel Rosdahl <joel@debian.org>
 License: GPL-3+
 
 Files: src/third_party/base32hex.*
@@ -28,11 +28,11 @@ Copyright: 2016-2021 Viktor Kirilov
 License: Expat
 
 Files: src/third_party/fmt/*.h
-Copyright: 2012-2021 Victor Zverovich
+Copyright: 2012-2022 Victor Zverovich
 License: Expat
 
 Files: src/third_party/format.cpp
-Copyright: 2012-2021 Victor Zverovich
+Copyright: 2012-2022 Victor Zverovich
 License: Expat
 
 Files: src/third_party/getopt_long.*
@@ -41,7 +41,7 @@ Copyright: 1987-1994 The Regents of the University of California
 License: BSD-3-clause
 
 Files: src/third_party/httplib.*
-Copyright: 2021 yhirose
+Copyright: 2022 yhirose
 License: Expat
 
 Files: src/third_party/minitrace.*
@@ -49,15 +49,11 @@ Copyright: 2014 Henrik Rydgård
 License: Expat
 
 Files: src/third_party/nonstd/expected.hpp
-Copyright: 2016-2018 Martin Moene
+Copyright: 2016-2020 Martin Moene
 License: Boost
 
-Files: src/third_party/nonstd/optional.hpp
-Copyright: 2014-2018 Martin Moene
-License: Boost
-
-Files: src/third_party/nonstd/string_view.hpp
-Copyright: 2017-2020 Martin Moene
+Files: src/third_party/nonstd/span.hpp
+Copyright: 2018-2021 Martin Moene
 License: Boost
 
 Files: src/third_party/url.*

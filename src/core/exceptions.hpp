@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,11 +18,9 @@
 
 #pragma once
 
-#include <FormatNonstdStringView.hpp>
-
 #include <third_party/fmt/core.h>
-#include <third_party/nonstd/optional.hpp>
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -40,44 +38,14 @@ class ErrorBase : public std::runtime_error
 // treated similar to Fatal.
 class Error : public ErrorBase
 {
-public:
-  // Special case: If given only one string, don't parse it as a format string.
-  Error(const std::string& message);
-
-  // `args` are forwarded to `fmt::format`.
-  template<typename... T> inline Error(T&&... args);
+  using ErrorBase::ErrorBase;
 };
-
-inline Error::Error(const std::string& message) : ErrorBase(message)
-{
-}
-
-template<typename... T>
-inline Error::Error(T&&... args)
-  : ErrorBase(fmt::format(std::forward<T>(args)...))
-{
-}
 
 // Throw a Fatal to make ccache print the error message to stderr and exit
 // with a non-zero exit code.
 class Fatal : public ErrorBase
 {
-public:
-  // Special case: If given only one string, don't parse it as a format string.
-  Fatal(const std::string& message);
-
-  // `args` are forwarded to `fmt::format`.
-  template<typename... T> inline Fatal(T&&... args);
+  using ErrorBase::ErrorBase;
 };
-
-inline Fatal::Fatal(const std::string& message) : ErrorBase(message)
-{
-}
-
-template<typename... T>
-inline Fatal::Fatal(T&&... args)
-  : ErrorBase(fmt::format(std::forward<T>(args)...))
-{
-}
 
 } // namespace core

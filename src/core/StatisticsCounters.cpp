@@ -1,4 +1,4 @@
-// Copyright (C) 2010-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2010-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -51,6 +51,19 @@ StatisticsCounters::get(Statistic statistic) const
   return index < m_counters.size() ? m_counters[index] : 0;
 }
 
+uint64_t
+StatisticsCounters::get_offsetted(Statistic statistic, size_t offset) const
+{
+  return get_raw(static_cast<size_t>(statistic) + offset);
+}
+
+uint64_t
+StatisticsCounters::get_raw(size_t index) const
+{
+  ASSERT(index < size());
+  return m_counters[index];
+}
+
 void
 StatisticsCounters::set(Statistic statistic, uint64_t value)
 {
@@ -59,11 +72,12 @@ StatisticsCounters::set(Statistic statistic, uint64_t value)
   m_counters[index] = value;
 }
 
-uint64_t
-StatisticsCounters::get_raw(size_t index) const
+void
+StatisticsCounters::set_offsetted(Statistic statistic,
+                                  size_t offset,
+                                  uint64_t value)
 {
-  ASSERT(index < size());
-  return m_counters[index];
+  set_raw(static_cast<size_t>(statistic) + offset, value);
 }
 
 void
@@ -78,6 +92,9 @@ StatisticsCounters::set_raw(size_t index, uint64_t value)
 void
 StatisticsCounters::increment(Statistic statistic, int64_t value)
 {
+  if (value == 0) {
+    return;
+  }
   const auto i = static_cast<size_t>(statistic);
   if (i >= m_counters.size()) {
     m_counters.resize(i + 1);
@@ -96,6 +113,15 @@ StatisticsCounters::increment(const StatisticsCounters& other)
     counter = std::max(static_cast<int64_t>(0),
                        static_cast<int64_t>(counter + other.m_counters[i]));
   }
+}
+
+void
+StatisticsCounters::increment_offsetted(Statistic statistic,
+                                        size_t offset,
+                                        int64_t value)
+{
+  increment(static_cast<Statistic>(static_cast<size_t>(statistic) + offset),
+            value);
 }
 
 size_t

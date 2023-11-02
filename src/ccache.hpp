@@ -1,5 +1,5 @@
 // Copyright (C) 2002-2007 Andrew Tridgell
-// Copyright (C) 2009-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2009-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,26 +19,36 @@
 
 #pragma once
 
-#include "Config.hpp"
-
-#include "third_party/nonstd/string_view.hpp"
+#include <Args.hpp>
+#include <Config.hpp>
 
 #include <functional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 class Context;
 
-extern const char CCACHE_NAME[];
 extern const char CCACHE_VERSION[];
 
 using FindExecutableFunction =
   std::function<std::string(const Context& ctx,
                             const std::string& name,
-                            const std::string& exclude_name)>;
+                            const std::string& exclude_path)>;
 
 int ccache_main(int argc, const char* const* argv);
 
 // Tested by unit tests.
+struct ArgvParts
+{
+  bool masquerading_as_compiler = true;
+  std::vector<std::string> config_settings;
+  Args compiler_and_args;
+};
+
+ArgvParts split_argv(int argc, const char* const* argv);
+
 void find_compiler(Context& ctx,
-                   const FindExecutableFunction& find_executable_function);
-CompilerType guess_compiler(nonstd::string_view path);
+                   const FindExecutableFunction& find_executable_function,
+                   bool masquerading_as_compiler);
+CompilerType guess_compiler(std::string_view path);

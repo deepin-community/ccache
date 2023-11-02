@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -23,7 +23,9 @@
 #include "Util.hpp"
 #include "hashutil.hpp"
 
+#include <Win32Util.hpp>
 #include <core/wincompat.hpp>
+#include <util/TimePoint.hpp>
 #include <util/path.hpp>
 
 #ifdef HAVE_UNISTD_H
@@ -34,8 +36,6 @@
 #include <string>
 #include <vector>
 
-using nonstd::string_view;
-
 Context::Context()
   : actual_cwd(Util::get_actual_cwd()),
     apparent_cwd(Util::get_apparent_cwd(actual_cwd)),
@@ -45,14 +45,16 @@ Context::Context()
     inode_cache(config)
 #endif
 {
+  time_of_invocation = util::TimePoint::now();
 }
 
 void
-Context::initialize()
+Context::initialize(Args&& compiler_and_args,
+                    const std::vector<std::string>& cmdline_config_settings)
 {
-  config.read();
+  orig_args = std::move(compiler_and_args);
+  config.read(cmdline_config_settings);
   Logging::init(config);
-
   ignore_header_paths =
     util::split_path_list(config.ignore_headers_in_manifest());
   set_ignore_options(Util::split_into_strings(config.ignore_options(), " "));
@@ -64,7 +66,7 @@ Context::initialize()
   // in the cache directory should be affected by the configured umask and that
   // no other files and directories should.
   if (config.umask()) {
-    original_umask = umask(*config.umask());
+    original_umask = Util::set_umask(*config.umask());
   }
 }
 

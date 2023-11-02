@@ -1,5 +1,1092 @@
 = Ccache news
 
+== Ccache 4.8.3
+
+Release date: 2023-08-29
+
+=== Bug fixes
+
+- Fixed various problems with parsing of MSVC response file (`.rsp`). +
+  [small]#_[contributed by Jiri Hörner]_#
+
+- Fixed handling of NVCC `-Xcompiler` and `--Werror` options. +
+  [small]#_[contributed by Andrew Hardin]_#
+
+- Fixed bookkeeping of files when hard linking or file cloning is enabled. In
+  ccache 4.8–4.8.2 this could result in incorrect size/count statistics after
+  automatic or explicit cleanup. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Made a workaround for GCC 12.3 bug 109241 where GCC fails to compile ccache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Upgraded to xxHash 0.8.2, which fixes compilation of ccache with GCC 12 and
+  `-Og`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.8.2
+
+Release date: 2023-06-12
+
+
+=== Bug fixes
+
+- Fixed parsing of Windows drive letter in file URLs for remote storage. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed a bug affecting depend mode with MSVC. +
+  [small]#_[contributed by Huang Qin Jin]_#
+
+- Ccache no longer passes `-v` to the preprocessor. This improves preprocessor
+  mode hit rate when `-v` is on the compiler command line. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made `--trim-max-size` accept 0 for no limit. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Made various fixes for Windows 64-bit MSBuild builds. +
+  [small]#_[contributed by Rafael Kitover]_#
+
+- Silenced CMake warning for extracted timestamps. +
+  [small]#_[contributed by Rafael Kitover]_#
+
+- Worked around problem with building ZStandard with Xcode. +
+  [small]#_[contributed by Gregor Jasny]_#
+
+- Fixed undefined behavior (only triggered by unit tests) in
+  `util::read_file_part` for zero count, making the build fail with
+  `+_GLIBCXX_ASSERTIONS+`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Clarified `--evict-older-than` semantics. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Test improvements
+
+- Fixed typo in "`Directory is not hashed if using -gz`" test. +
+  [small]#_[contributed by Sam James]_#
+
+
+== Ccache 4.8.1
+
+Release date: 2023-05-19
+
+
+=== Bug fixes
+
+- Fixed an issue with the depend mode in combination with `--` on the command
+  line for Clang-based compilers. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved knowledge about MSVC debug flags so that non-debug `/Z*` options are
+  once again supported. +
+  [small]#_[contributed by Stephan Rohmen]_#
+
+- Ccache no longer treats `/Zi` as unsupported for clang-cl. +
+  [small]#_[contributed by Tobias Hieta]_#
+
+- Made the output format of `ccache -k max_size` parsable by ccache itself. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build/CI improvements
+
+- Corrected ccache version in the macOS binary release. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made it possible to build ccache with clang-cl on Windows. +
+  [small]#_[contributed by Tobias Hieta]_#
+
+- Upgraded to doctest 2.4.11, thereby fixing a build issue on Solaris. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Added a remote file storage example with URL-encoded spaces. +
+  [small]#_[contributed by Joel Rosdahl]_
+
+
+== Ccache 4.8
+
+Release date: 2023-03-12
+
+
+=== New features and improvements
+
+- Improved the automatic cache cleanup mechanism. Automatic cleanups are now
+  performed on 1/256 of the cache instead of 1/16, thus making them much quicker
+  (but naturally more frequent). Cleanups are coordinated between ccache
+  processes so that at most one process will perform cleanup at a time. Also,
+  the actual cache size will stay very close to the configured maximum size
+  instead of staying around 90% as was the case before. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for setting per-compilation configuration options on the command
+  line. Example: `ccache hash_dir=false gcc -c example.c`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made it possible to disable ccache for a certain source code file by embedding
+  the string `ccache:disable` in a comment near the top of the file. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made ccache understand that an MSVC `/Z7` option overrides an earlier `/Z*`
+  option and thus is not too hard to cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a `--recompress-threads` command line option for selecting the number of
+  CPU threads to use when recompressing the local cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added `--trim-recompress` and `--trim-recompress-threads` command line options
+  for recompressing file-based remote storage. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added tmpfs, ufs and zfs to the list of supported filesystems on macOS and
+  BSDs for the inode cache. +
+  [small]#_[contributed by Oleg Sidorkin]_#
+
+- Improved progress bars for clean/clear/evict-style operations. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved printing of cache sizes in various outputs. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Activate debug logging for command mode options like `--cleanup`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for `-Wp,-U<macro>` in the direct mode. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added quotes around arguments with space in logged command lines. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added logging of executed command lines on Windows. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made sure not to update the stats file when there are no incremented
+  counters. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved actual disk size calculation on Windows. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build/CI improvements
+
+- Added CI support for building macOS universal binaries. +
+  [small]#_[contributed by Raihaan Shouhell]_#
+
+- Make it possible to force download of Zstd and Hiredis, e.g. with `cmake -D
+  ZSTD_FROM_INTERNET=ON [...]`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Bug fixes
+
+- Fixed an edge case where a non-temporal identifier is misidentified. +
+  [small]#_[contributed by Erik Flodin]_#
+
+- Fixed reporting of local/remote cache misses in depend mode. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed parsing of backslashes in MSVC RSP files. +
+  [small]#_[contributed by Raihaan Shouhell]_#
+
+- Fixed a crash in `--show-log-stats` when the stats log file doesn't exist. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed matching of base directory for MSVC. The base directory will now match
+  case-insensitively with absolute paths in preprocessed output, or from
+  `/showIncludes` in the depend mode case, when compiling with MSVC. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed a problem where the original umask would be used when storing a remote
+  cache result in the local cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Changed the inode cache implementation to use spinlocks instead of pthread
+  mutexes. This makes the inode cache work on FreeBSD and similar systems. +
+  [small]#_[contributed by Oleg Sidorkin]_#
+
+- Don't treat `-Wp,-D` as interchangeable with `-D`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Disable the inode cache if the filesystem risks getting full soon. This fixes
+  a problem when the cache is on a filesystem where `posix_fallocate` isn't
+  reliable, like Btrfs with compression enabled. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed performance of cache path relativization in preprocessed output,
+  primarily on Windows where `stat` calls are relatively costly. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed rare crash in the signal handler at process exit. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed handling of Unix-style paths passed to MSVC. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed so that the config options and command line are logged before trying to
+  locate the compiler and exiting early. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Improved description of `--set-config`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed broken markup in the manual. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a note to the manual that `stats = false` will disable automatic
+  cleanup. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fix a bad reference to the "`Remote storage backends`" section. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.7.5
+
+Release date: 2023-03-20
+
+=== Bug fixes
+
+- Disabled the inode cache by default again since there have reports of ccache
+  processes hanging on futex calls related to the inode cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.7.4
+
+Release date: 2022-11-21
+
+
+=== Bug fixes
+
+- Fixed an inode cache race condition. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The default temporary directory is now `$XDG_RUNTIME_DIR/ccache-tmp` instead
+  of a hardcoded `/run/user/<UID>/ccache-tmp`. If `XDG_RUNTIME_DIR` is not set,
+  `<cache_dir>/tmp` is used. This avoids creating `/run/user/<UID>` on systems
+  that don't have it if compiling as root. +
+  [small]#_[contributed by Joel Rosdahl and Oleg Sidorkin]_#
+
+- Added a fallback in case `posix_fallocate` returns `EINVAL` when creating the
+  inode cache file. +
+  [small]#_[contributed by Oleg Sidorkin]_#
+
+- Connection timeout for an HTTP connection is now reported as a timeout instead
+  of an error. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Temporary files found in the cache are no longer counted in
+  `--show-compression`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Removed duplicate magic header in output from `--inspect`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Ccache now properly waits for all recompression jobs to finish when there is
+  no `f` subdirectory in the cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Other minor improvements
+
+- Improved inode cache logging. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Removed stray parenthesis. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved description of how header files are handled. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a hint about using `-fno-pch-timestamp` for precompiled headers with
+  Clang. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Removed obsolete description of compiler type "`pump`". +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+
+== Ccache 4.7.3
+
+Release date: 2022-11-05
+
+
+=== New features and improvements
+
+- Re-added support for handling a `-Wp,-MD` or `-Wp,-MMD` option with `-o` but
+  without `-MMD`, `-MQ` or `-MT` for GCC and Clang. (This combination of options
+  is used by the Linux kernel build system and became unsupported as a
+  side-effect of a feature added in ccache 4.7.) +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Variables that affect Clang version on macOS are now added to the input
+  hash. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Variables that affect the underlying compiler used by ICC (the Intel compiler)
+  are now added to the input hash. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Bug fixes
+
+- Fixed parsing of sloppiness with a trailing delimiter. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Other minor improvements
+
+- Removed a redundant slash in URLs when querying remote HTTP storage. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved logging related to the inode cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Added documentation of the default value of *keep_comments_cpp*. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Test improvements
+
+- Silenced various benign test warnings. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.7.2
+
+Release date: 2022-10-29
+
+
+=== Bug fixes
+
+- Fixed a problem when using 32-bit and 64-bit ccache binaries with the same
+  inode cache file. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Ccache now processes the argument following a `-Xarch` option. +
+  [small]#_[contributed by an anonymous user]_#
+
+- Made sure to use the configured umask for command line operations like
+  `--zero-stats` so that newly created cache directories will have correct
+  permissions. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Include `limits.h` for `PATH_MAX`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Test improvements
+
+- Disabled flaky Windows profiling tests. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.7.1
+
+Release date: 2022-10-22
+
+
+=== Bug fixes
+
+- Fixed a regression in 4.7 related to using the `-MD` or `-MMD` option when
+  compiling an assembler file. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Added support for compiling ccache with GCC 8. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Removed unneeded C++11 flag in libatomic test. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+
+== Ccache 4.7
+
+Release date: 2022-10-17
+
+
+=== Compatibility notes
+
+- The cache entry format has changed, so ccache 4.7 will not share cache entries
+  with earlier versions. Different ccache versions can however still use the
+  same cache storage without any issues.
+
+- The https://ccache.dev/manual/4.7.html#config_cache_dir[default location of
+  the cache directory] on Windows has been changed from `%APPDATA%\ccache` to
+  `%LOCALAPPDATA%\ccache`. Please remove any existing `%APPDATA%\ccache`
+  directory or move it to `%LOCALAPPDATA%\ccache` to keep it.
+
+
+=== Changed tooling
+
+- A C++17 compiler and CMake 3.15 or newer are now required to
+  build ccache.
+
+
+=== New and improved features
+
+- The https://ccache.dev/manual/4.7.html#config_inode_cache[inode cache] is now
+  enabled by default, but only if the filesystem where ccache's temporary
+  directory is located is known to work with the inode cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved performance of cache entry reading and writing. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a https://ccache.dev/manual/4.7.html#config_remote_only[*remote_only*]
+  configuration option, which tells ccache to disable local storage. This way,
+  ccache can use a shared
+  link:pass:[https://ccache.dev/manual/4.7.html#_remote_storage_backends][network cache]
+  without writing cache entries locally, which can be useful if the local
+  storage is ephemeral. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Renamed configuration option *secondary_storage* to
+  https://ccache.dev/manual/4.7.html#config_remote_storage[*remote_storage*].
+  The old spelling will still work as a deprecated alias. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved handling of manifests when using both local and remote storage.
++
+On a cache miss, ccache used to update the local manifest file and write it to
+remote storage, thereby overwriting any preexisting manifest entries on remote
+storage. Similarly, the local manifest could be replaced by the remote manifest
+on a remote cache hit, thus discarding local entries. This has now been improved
+so that ccache will merge local and remote manifest entries transparently. +
+[small]#_[contributed by Joel Rosdahl and an anonymous user]_#
+
+- Added support for caching assembler listing files with compiler option
+  `-Wa,-a=file`. This also fixes a bug in ccache 4.6.2+ where usage of
+  `-Wa,-march=...` makes ccache fall back to running the compiler. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved statistics shown by `ccache --show-stats`. Most values are now shown
+  in relation to a total count, and some less useful statistics counters have
+  been changed to be displayed only with `--verbose`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved statistics for remote hits and misses. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Renamed "`Primary config`" to "`Config file`" and "`Secondary config`" to
+  "`System config file`" in the output of `ccache --show-stats --verbose`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for
+  link:pass:[https://ccache.dev/manual/4.7.html#_run_modes][masquerading as a
+  compiler] via a copy or hard link of the ccache executable. Previously, ccache
+  only supported masquerading as a compiler by using a symbolic link. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- A timestamp is now included in
+  link:pass:[https://ccache.dev/manual/4.7.html#_cache_debugging][per-object
+  debug filenames]. This makes it easier to compare two builds without having to
+  save previous debug files before the second build. It also makes sure debug
+  files won't be overwritten if an object file is compiled several times during
+  one build. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for Clang's `--` option. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Cache entries are now shared for different `-MT`/`-MQ` options. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The https://ccache.dev/manual/4.7.html#config_cache_dir[default location of
+  the cache directory] on Windows has been changed to `%LOCALAPPDATA%\ccache`,
+  both in Windows Bash and Windows native environments such as CMD or
+  Powershell.
++
+Previous ccache versions defaulted to storing the cache in `%APPDATA%\ccache` on
+Windows in native environment (i.e., when the `%USER%` variable was not set),
+which could result in large network file transfers of the cache in domain
+environments and similar problems. +
+[small]#_[contributed by Rafael Kitover]_#
+
+- Ccache now uses subsecond resolution timestamps when checking for "`too new
+  include files`". In practice, this means that the direct mode will no longer
+  be disabled for newly generated include files. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Started using subsecond resolution timestamps in manifest files. This improves
+  accuracy with *file_stat_matches*
+  https://ccache.dev/manual/4.7.html#config_sloppiness[sloppiness]. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for subsecond timestamps on macOS. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added link:pass:[https://ccache.dev/manual/4.7.html#_the_depend_mode][depend
+  mode] support for MSVC. +
+  [small]#_[contributed by Orgad Shaneh and Luboš Luňák]_#
+
+- Added support for the Intel compiler on Windows. +
+  [small]#_[contributed by Daniel Richtmann]_#
+
+- Ccache now sets `CCACHE_DISABLE` when running the compiler. This avoids
+  running ccache twice (and potentially storing two different results in the
+  cache) if, for instance, the compiler happens to be a wrapper script that in
+  turn runs `ccache $compiler ...`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added support for Redis over Unix sockets. +
+  [small]#_[contributed by Anders F Björklund]_#
+
+- Added support for GCC's `-fprofile-abs-path` option by including the current
+  working directory in the input hash. To opt out of this, set *gcno_cwd*
+  https://ccache.dev/manual/4.7.html#config_sloppiness[sloppiness]. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made it possible to exclude `-frandom-seed=_seed_` options from the input hash
+  with a new *random_seed*
+  https://ccache.dev/manual/4.7.html#config_sloppiness[sloppiness]. +
+  [small]#_[contributed by Raihaan Shouhell]_#
+
+- Added support for server name in
+  link:pass:[https://ccache.dev/manual/4.7.html#_file_storage_backend][remote
+  storage file URLs] on Windows. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Configuration file locations are now included in the
+  link:pass:[https://ccache.dev/manual/4.7.html#_cache_debugging][debug log]. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The inode cache file is no longer removed with `ccache --clear`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Result format version and number of files are now printed when inspecting a
+  result cache entry file. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Removed features
+
+- Removed the *share-hits* attribute for remote storage. It has been superseded
+  by the https://ccache.dev/manual/4.7.html#config_remote_only[*remote_only*]
+  configuration option. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Buggy support for GCC-specific environment variables `DEPENDENCIES_OUTPUT` and
+  `SUNPRO_DEPENDENCIES` has been removed. If any of those variables are set,
+  ccache now just falls back to running the real compiler. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Bug fixes
+
+- The correct dependency target will now be produced even when a
+  https://ccache.dev/manual/4.7.html#config_base_dir[base directory] is used --
+  the dependency target will still be an absolute path. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed a bug that could lead to bad modification timestamp (mtime) for object
+  files on systems that lack `utimensat` and `utimes` system calls (such as
+  Windows). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed ordering of MSVC include directory options when using
+  `/external:I<directory>`. +
+  [small]#_[contributed by Raihaan Shouhell]_#
+
+- Fixed capturing of MSVC stdout/stderr when running from Visual Studio. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Carriage return characters are now retained in the compiler output on
+  Windows. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Made sure not to increment the "`preprocessed_cache_miss`" counter in recache
+  mode. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed an issue with the inode cache in combination with
+  `+__DATE__+`/`+__TIME__+`/`+__TIMESTAMP__+` macros in the source code. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made sure to enable the inode cache only if subsecond timestamps are
+  available. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Cache entries created with enabled hard linking or file cloning are no longer
+  written to remote storage since they won't be possible to retrieve correctly
+  anyway. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Ccache now accepts spaces between target and colon when parsing dependency
+  files in the depend mode. +
+  [small]#_[contributed by Louis Caron]_#
+
+- Fixed a crash when failing to write an error message to stderr after failing
+  to write to the log file. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made ccache able to retrieve an object file from the cache even if the
+  destination object file exists and is read-only. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The `.exe` extension is now stripped from the ccache executable name in
+  `ccache --version` on Windows.  +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Fixed naming of temporary files written to the cache directory. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Enabled static runtime linking for MSVC. +
+  [small]#_[contributed by Cristian Adam and Rafael Kitover]_#
+
+- The Zstandard and Hiredis dependencies are now by default downloaded from the
+  Internet when unavailable. +
+  [small]#_[contributed by Rafael Kitover]_#
+
+- Added support for pkgconfig to find a Zstandard installation. +
+  [small]#_[contributed by Rosen Penev]_#
+
+- Removed usage of the deprecated `codecvt` header. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Added headers to CMake project files. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+
+=== Test improvements
+
+- Made the integration tests work on Windows. +
+  [small]#_[contributed by Orgad Shaneh and R. Voggenauer]_#
+
+- Improved diagnostics from the "`Version output readable`" test. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Made setting the `KEEP_TESTDIR` variable actually work. +
+  [small]#_[contributed by Louis Caron]_#
+
+- Fixed a typo in depend mode tests. +
+  [small]#_[contributed by Louis Caron]_#
+
+- Added more depend mode tests. +
+  [small]#_[contributed by Louis Caron]_#
+
+
+=== Documentation improvements
+
+- Improved the
+  https://github.com/ccache/ccache/blob/v4.7/doc/INSTALL.md[installation
+  guide]. +
+  [small]#_[contributed by Rafael Kitover]_#
+
+- Fixed a typo in the help text. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.6.3
+
+Release date: 2022-08-27
+
+
+=== Bug fixes
+
+- Fixed MSVC support (regression in ccache 4.6.2). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed detection of PCH header for concatenated `-include` option (e.g.,
+  `-includepch.h` instead of `-include pch.h`). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Fixed build with musl when using GCC 12. +
+  [small]#_[contributed by Khem Raj]_#
+
+
+=== Test improvements
+
+- Disabled the "`Failure to write output file`" test when running on a
+  filesystem that doesn't support read-only directories. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.6.2
+
+Release date: 2022-08-22
+
+
+=== Bug fixes
+
+- Fixed a race condition that could lead to a crash if a file in the cache is
+  removed with unlucky timing, e.g. by another ccache process doing cache
+  cleanup. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Dependency file rewriting will now always be performed if
+  `base_dir`/`CCACHE_BASEDIR` is active. This fixes a problem with the
+  dependency file content when Clang is used with `-fsanitize=address`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed handling of error condition for `--hash-file`/`--checksum-file`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made sure to enable the inode cache only if subsecond `stat` timestamps are
+  available. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a work-around for a Clang bug when writing to a full NFS file system. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made failure writing to the output file increment the "`bad output file`"
+  counter instead of "`cache miss`". +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed false positive cache hits for code constructions similar to
+  `__asm__(".incbin" " \"file\"")`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed false success for `-fcolor-diagnostics` probe with GCC. A side effect of
+  this is that a compiler type that ccache can't identify from the compiler name
+  (such as `/usr/bin/cc` where `cc` is not a symlink) from now on won't produce
+  color diagnostics when used via ccache even if the compiler actually is GCC or
+  Clang. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- More cases of invalid secondary storage URLs are now handled gracefully. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed the display of maximum cache size in `ccache -s` if it's 0 (=
+  unlimited). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Removed AsciiDoc markup from help text of `--trim-dir`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The temporary directory is now cleaned up properly even if it's left
+  unconfigured. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made cleanup of the temporary directory not rely a directory timestamp. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made sure to retain mtime/atime when recompressing cache files with
+  `-X`/`--recompress`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The correct umask is now used when populating the primary cache from a
+  secondary cache. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed creation of temporary files on file systems that don't support hard
+  links (such as FAT32). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added knowledge about `-Wa,...=file` so that ccache then falls back to running
+  the real compiler. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Corrected handling of space in paths when using response file on Windows. +
+  [small]#_[contributed by Sergey Semushin]_#
+
+- Fixed crash due to empty include filename in preprocessor output generated by
+  `f2c`. +
+  [small]#_[contributed by Oleg Sidorkin]_#
+
+
+=== Build improvements
+
+- Fixed build problems with a development version of GCC 13. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed build problems with MSVC. +
+  [small]#_[contributed by Florin Trofin]_#
+
+
+=== Test improvements
+
+- Clang warnings from the "`-fdebug-prefix-map`" test are now suppressed. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Made sure to only run the "`-ftest-coverage + -fprofile-dir`" test with GCC. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed printing of error messages with embedded newlines. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed warning when running the "`inode_cache`" test in isolation. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed test failure when the compiler used for testing is an old ccache version
+  masquerading as the compiler. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Mentioned that mtime is used for LRU cleanup. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.6.1
+
+Release date: 2022-05-15
+
+
+=== New features
+
+- Added support for passing a directory to the MSVC `/Fo` option. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Added knowledge about the `-imsvc` compiler option. +
+  [small]#_[contributed by Jacob Young]_#
+
+- Added knowledge about the `-z` linker option. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Bug fixes
+
+- Improved handling of `.gcno` files in combination with absolute input file
+  paths. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Adapted to changes in GCC 9+ `.gcno` files, which contain the current working
+  directory, by including said directory in the hash. You can opt out of this by
+  enabling "`gcno_cwd sloppiness`". +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- A preexisting object file is no longer considered when using
+  `-fsyntax-only`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Authenticate with Redis before database selection. +
+  [small]#_[contributed by an anonymous user]_#
+
+- Don't exit with an error on failure reading a cached file. +
+  [small]#_[contributed by an anonymous user]_#
+
+- Bail out on too hard MSVC environment variables `CL` and `+_CL_+`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Only use `/run/user/<UID>/ccache-tmp` as the temporary directory if it's
+  writable. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed handling of the final newline in cached standard output from the
+  compiler. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Fixed a bug related to distcc markers in standard error output. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Paths to `base_dir` are now properly normalized on Windows. +
+  [small]#_[contributed by Vili Väinölä and Joel Rosdahl]_#
+
+- Fixed handling of MSVC `/Fp` and `/Yu` options with concatenated path. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed "`Multiple precompiled headers used`" error if MSVC `/Yu` option is used
+  after `/Fp`. +
+  [small]#_[contributed by Alexey Telishev]_#
+
+- Check for short reads when reading strings in result/manifest files. +
+  [small]#_[contributed by Gregor Jasny]_#
+
+- Log expanded secondary storage URL in put/remove. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed logging of statistics counters with value higher than one in debug log
+  and stats log. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Avoid incorrect error log message for Redis write operations in `reshare`
+  mode. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Support Redis URL without host (meaning localhost). +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Build improvements
+
+- Prefer CMake find module for hiredis and zstd packages. +
+  [small]#_[contributed by Cristian Adam and Joel Rosdahl]_#
+
+- Fixed building and linking BLAKE3 with MSVC. +
+  [small]#_[contributed by Rafael Kitover]_#
+
+- Fixed static linkage with hiredis on Windows. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Fixed miscompile of nonstd::expected on MSVC v19.22. +
+  [small]#_[contributed by Jacob Young]_#
+
+- Fixed build arguments to clang-cl. +
+  [small]#_[contributed by Jacob Young]_#
+
+- Fixed parsing of MSVC response files.  +
+  [small]#_[contributed by Jacob Young]_#
+
+- Support Git 1.x when determining ccache version. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Test improvements
+
+- Worked around an endianness problem which affected builds and tests on
+  big-endian systems. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- A C++-capable compiler is no longer required for the test suite. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed an issue with inode cache tests, leading to sporadic failures in the
+  inode test suite when running many parallel tests. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed sporadic failures in the profiling test suite. +
+  [small]#_[contributed by Jacob Young]_#
+
+
+=== Documentation improvements
+
+- Added reference to example build configs in installation instructions. +
+  [small]#_[contributed by an anonymous user]_#
+
+- Default cache locations are now mentioned for Windows and macOS as well. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added a warning about usage of `base_dir`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.6
+
+Release date: 2022-02-27
+
+
+=== New features
+
+- Added support for caching calls to Microsoft Visual C++ (MSVC) and clang-cl
+  (MSVC compatibility for Clang). +
+  [small]#_[contributed by Cristian Adam, Luboš Luňák, Orgad Shaneh and Joel
+  Rosdahl]_#
+
+- Added an option to use a bearer token with the HTTP backend. This makes it
+  possible to use e.g. Google Cloud Storage as a secondary storage backend. +
+  [small]#_[contributed by an anonymous user]_#
+
+- Added support for caching standard output from the compiler. +
+  [small]#_[contributed by Luboš Luňák and Joel Rosdahl]_#
+
+- Added a new `--inspect` option for debugging cache entries, replacing the
+  previous `--dump-manifest` and `--dump-result` options. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Enabled HTTP keep-alive by default. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Bug fixes
+
+- Fixed copying of binary files on Windows. +
+  [small]#_[contributed by R. Voggenauer]_#
+
+- Improved detection of the `.incbin` assembler directive to reduce false
+  positives. +
+  [small]#_[contributed by Alexey Sheplyakov]_#
+
+- Ccache now verifies that `/run/user/<UID>/ccache-tmp` is writable before using
+  it for temporary files. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Fixed statistics output for secondary storage. +
+  [small]#_[contributed by Orgad Shaneh]_#
+
+- Fixed a problem when copying a cache entry from secondary storage into an
+  empty primary storage. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Visual Studio .rsp files with UTF-16LE encoding are now handled correctly. +
+  [small]#_[contributed by Vili Väinölä]_#
+
+- Made conversion to relative paths more reliable on Windows. +
+  [small]#_[contributed by Marius Zwicker]_#
+
+- The process umask is now respected when making hard linked files read only. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- A forced recache is no longer considered a "`direct cache miss`". +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+=== Documentation improvements
+
+- Corrected reference to the `debug_dir` option. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Improved documentation of `--config-path`. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Added documentation that compiler plugins are hashed too. +
+  [small]#_[contributed by Philipp Gortan]_#
+
+
+=== Test improvements
+
+- The "`trim_dir`" test suite is now only run when cleanup tests are enabled. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
+== Ccache 4.5.1
+
+Release date: 2021-11-17
+
+
+=== Bug fixes
+
+- Fixed entry_size field for result entries. This bug affected the recompression
+  feature (`-X`/`--recompress`) in ccache 4.5. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- The actual compression level is now once again stored in the cache entry
+  header. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+- Corrected error handling for non-constructible secondary storage backends. For
+  instance, this avoids a crash when a Redis server can't be reached. +
+  [small]#_[contributed by Joel Rosdahl]_#
+
+
 == Ccache 4.5
 
 Release date: 2021-11-13
@@ -424,7 +1511,7 @@ Release date: 2021-02-02
 - The value of the `SOURCE_DATE_EPOCH` variable is now only hashed if it
   potentially affects the output from ccache. This means that ccache now (like
   before version 4.0) will be able to produce cache hits for source code that
-  doesn't contain `__DATE__` or `__TIME__` macros regardless of the value of
+  doesn't contain `+__DATE__+` or `+__TIME__+` macros regardless of the value of
   `SOURCE_DATE_EPOCH`.
 
 
@@ -726,9 +1813,9 @@ Release date: 2020-10-18
   `-x/--show-compression` and `-X/--recompress`.
 
 - When supported by the CPU, a SIMD-friendly (using AVX2) algorithm is now used
-  to scan input source code for `__DATE__`, `__TIME__` and `__TIMESTAMP__`
-  macros. This can decrease the number of CPU cycles for a direct cache hit
-  with up to 15% in some cases.
+  to scan input source code for `+__DATE__+`, `+__TIME__+` and `+__TIMESTAMP__+`
+  macros. This can decrease the number of CPU cycles for a direct cache hit with
+  up to 15% in some cases.
 
 - Some unnecessary `stat(2)` system calls are now avoided when verifying header
   files.
@@ -781,10 +1868,10 @@ Release date: 2020-10-18
 
 - The manifest format now allows for header files larger than 4 GiB.
 
-- Made it possible to once again cache compilations with `__DATE__` in the
+- Made it possible to once again cache compilations with `+__DATE__+` in the
   source code.
 
-- Added handling of the `__TIMESTAMP__` macro.
+- Added handling of the `+__TIMESTAMP__+` macro.
 
 - An absolute input source path is now rewritten to a relative path when using
   `base_dir`.
@@ -1267,9 +2354,9 @@ Release date: 2019-01-14
 - The GCC variables "`DEPENDENCIES_OUTPUT`" and "`SUNPRO_DEPENDENCIES`" are now
   supported correctly.
 
-- The algorithm that scans for `__DATE_` and `__TIME__` tokens in the hashed
-  source code now doesn't produce false positives for tokens where `__DATE__`
-  or `__TIME__` is a substring.
+- The algorithm that scans for `__DATE_` and `+__TIME__+` tokens in the hashed
+  source code now doesn't produce false positives for tokens where `+__DATE__+`
+  or `+__TIME__+` is a substring.
 
 
 == Ccache 3.5.1
@@ -1428,7 +2515,7 @@ Release date: 2018-02-11
 - ccache now treats an unreadable configuration file just like a missing
   configuration file.
 
-- Documented more pitfalls with enabling `hard_links` (`CCACHE_HARDLINK`).
+- Documented more pitfalls with enabling `hard_link` (`CCACHE_HARDLINK`).
 
 - Documented caveats related to colored warnings from compilers.
 
@@ -1736,7 +2823,7 @@ Release date: 2016-04-17
 - Include m4 files used by configure.ac in the source dist archives.
 
 - Corrected "`Performance`" section in the manual regarding `__DATE_`,
-  `__TIME__` and `__FILE__` macros.
+  `+__TIME__+` and `+__FILE__+` macros.
 
 - Fixed build on Solaris 10+ and AIX 7.
 
@@ -1887,7 +2974,7 @@ Release date: 2014-11-17
 - Made creation of temporary directories and cache directories smarter to avoid
   unnecessary `stat` calls.
 
-- Improved efficiency of the algorithm that scans for `__DATE_` and `__TIME__`
+- Improved efficiency of the algorithm that scans for `__DATE_` and `+__TIME__+`
   tokens in the hashed source code.
 
 - Added support for several binaries (separated by space) in `CCACHE_PREFIX`.
@@ -2239,7 +3326,7 @@ Release date: 2010-11-28
 
 === Other
 
-- Portability fixes for HP-UX 11.00 and other esoteric systems.
+- Portability fixes for HP-UX 11.00 and other less common systems.
 
 
 == Ccache 3.1.2

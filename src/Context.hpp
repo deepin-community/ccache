@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2021 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -30,13 +30,14 @@
 #  include "InodeCache.hpp"
 #endif
 
+#include <core/Manifest.hpp>
 #include <storage/Storage.hpp>
-
-#include "third_party/nonstd/optional.hpp"
-#include "third_party/nonstd/string_view.hpp"
+#include <util/TimePoint.hpp>
 
 #include <ctime>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -50,7 +51,8 @@ public:
 
   // Read configuration, initialize logging, etc. Typically not called from unit
   // tests.
-  void initialize();
+  void initialize(Args&& compiler_and_args,
+                  const std::vector<std::string>& cmdline_config_settings);
 
   ArgsInfo args_info;
   Config config;
@@ -64,15 +66,15 @@ public:
   // The original argument list.
   Args orig_args;
 
+  // Time of ccache invocation.
+  util::TimePoint time_of_invocation;
+
   // Time of compilation. Used to see if include files have changed after
   // compilation.
-  time_t time_of_compilation = 0;
+  util::TimePoint time_of_compilation;
 
   // Files included by the preprocessor and their hashes.
   std::unordered_map<std::string, Digest> included_files;
-
-  // Uses absolute path for some include files.
-  bool has_absolute_include_headers = false;
 
   // Have we tried and failed to get colored diagnostics?
   bool diagnostics_color_failed = false;
@@ -80,14 +82,17 @@ public:
   // The name of the temporary preprocessed file.
   std::string i_tmpfile;
 
-  // The name of the cpp stderr file.
-  std::string cpp_stderr;
+  // The preprocessor's stderr output.
+  util::Bytes cpp_stderr_data;
 
   // Headers (or directories with headers) to ignore in manifest mode.
   std::vector<std::string> ignore_header_paths;
 
-  // Storage (fronting primary and secondary storage backends).
+  // Storage (fronting local and remote storage backends).
   storage::Storage storage;
+
+  // Direct mode manifest.
+  core::Manifest manifest;
 
 #ifdef INODE_CACHE_SUPPORTED
   // InodeCache that caches source file hashes when enabled.
@@ -107,12 +112,16 @@ public:
 
   // Original umask before applying the `umask`/`CCACHE_UMASK` configuration, or
   // `nullopt` if there is no such configuration.
-  nonstd::optional<mode_t> original_umask;
+  std::optional<mode_t> original_umask;
 
 #ifdef MTR_ENABLED
   // Internal tracing.
   std::unique_ptr<MiniTrace> mini_trace;
 #endif
+
+  // Whether we have added "/showIncludes" ourselves since it's missing and
+  // depend mode is enabled.
+  bool auto_depend_mode = false;
 
   // Register a temporary file to remove at program exit.
   void register_pending_tmp_file(const std::string& path);

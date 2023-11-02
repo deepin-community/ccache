@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2022 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,16 +19,17 @@
 #pragma once
 
 #include <core/types.hpp>
-#include <storage/primary/PrimaryStorage.hpp>
-#include <storage/secondary/SecondaryStorage.hpp>
+#include <storage/local/LocalStorage.hpp>
+#include <storage/remote/RemoteStorage.hpp>
 #include <storage/types.hpp>
+#include <util/Bytes.hpp>
 
-#include <third_party/nonstd/optional.hpp>
+#include <third_party/nonstd/span.hpp>
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 class Digest;
@@ -37,8 +38,8 @@ namespace storage {
 
 std::string get_features();
 
-struct SecondaryStorageBackendEntry;
-struct SecondaryStorageEntry;
+struct RemoteStorageBackendEntry;
+struct RemoteStorageEntry;
 
 class Storage
 {
@@ -49,45 +50,46 @@ public:
   void initialize();
   void finalize();
 
-  primary::PrimaryStorage primary;
+  local::LocalStorage local;
 
-  // Returns a path to a file containing the value.
-  nonstd::optional<std::string> get(const Digest& key,
-                                    core::CacheEntryType type);
+  using EntryReceiver = std::function<bool(util::Bytes&&)>;
 
-  bool put(const Digest& key,
+  void get(const Digest& key,
            core::CacheEntryType type,
-           const storage::EntryWriter& entry_writer);
+           const EntryReceiver& entry_receiver);
+
+  void put(const Digest& key,
+           core::CacheEntryType type,
+           nonstd::span<const uint8_t> value);
 
   void remove(const Digest& key, core::CacheEntryType type);
 
-  bool has_secondary_storage() const;
-  std::string get_secondary_storage_config_for_logging() const;
+  bool has_remote_storage() const;
+  std::string get_remote_storage_config_for_logging() const;
 
 private:
   const Config& m_config;
-  std::vector<std::unique_ptr<SecondaryStorageEntry>> m_secondary_storages;
-  std::vector<std::string> m_tmp_files;
+  std::vector<std::unique_ptr<RemoteStorageEntry>> m_remote_storages;
 
-  void add_secondary_storages();
+  void add_remote_storages();
 
-  void
-  mark_backend_as_failed(SecondaryStorageBackendEntry& backend_entry,
-                         secondary::SecondaryStorage::Backend::Failure failure);
+  void mark_backend_as_failed(RemoteStorageBackendEntry& backend_entry,
+                              remote::RemoteStorage::Backend::Failure failure);
 
-  SecondaryStorageBackendEntry*
-  get_backend(SecondaryStorageEntry& entry,
-              const Digest& key,
-              nonstd::string_view operation_description,
-              const bool for_writing);
-  nonstd::optional<std::pair<std::string, bool>>
-  get_from_secondary_storage(const Digest& key);
+  RemoteStorageBackendEntry* get_backend(RemoteStorageEntry& entry,
+                                         const Digest& key,
+                                         std::string_view operation_description,
+                                         const bool for_writing);
 
-  void put_in_secondary_storage(const Digest& key,
-                                const std::string& value,
-                                bool only_if_missing);
+  void get_from_remote_storage(const Digest& key,
+                               core::CacheEntryType type,
+                               const EntryReceiver& entry_receiver);
 
-  void remove_from_secondary_storage(const Digest& key);
+  void put_in_remote_storage(const Digest& key,
+                             nonstd::span<const uint8_t> value,
+                             bool only_if_missing);
+
+  void remove_from_remote_storage(const Digest& key);
 };
 
 } // namespace storage
