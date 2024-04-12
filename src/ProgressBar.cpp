@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2022 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,12 +18,9 @@
 
 #include "ProgressBar.hpp"
 
-#include "fmtmacros.hpp"
-
-#include <assertions.hpp>
-#include <core/wincompat.hpp>
-
-#include "third_party/fmt/core.h"
+#include <util/assertions.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/wincompat.hpp>
 
 #ifdef _WIN32
 #else
@@ -93,7 +90,8 @@ ProgressBar::update(double value)
     PRINT(stdout, "\r{} {:5.1f}%", m_header, new_value_percent);
   } else {
     size_t total_bar_width = m_width - first_part_width;
-    size_t filled_bar_width = (new_value_percent / 100) * total_bar_width;
+    size_t filled_bar_width = static_cast<size_t>(
+      (new_value_percent / 100) * static_cast<double>(total_bar_width));
     size_t unfilled_bar_width = total_bar_width - filled_bar_width;
     PRINT(stdout,
           "\r{} {:5.1f}% [{:=<{}}{: <{}}]",

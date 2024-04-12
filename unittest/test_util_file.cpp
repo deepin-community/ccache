@@ -19,15 +19,45 @@
 #include "TestUtil.hpp"
 
 #include <util/Bytes.hpp>
+#include <util/DirEntry.hpp>
+#include <util/Fd.hpp>
 #include <util/file.hpp>
+#include <util/filesystem.hpp>
+#include <util/fmtmacros.hpp>
 #include <util/string.hpp>
 
 #include <third_party/doctest.h>
 
+#include <fcntl.h>
+
 #include <cstring>
+#include <string>
 #include <string_view>
+#include <vector>
+
+namespace fs = util::filesystem;
 
 using TestUtil::TestContext;
+using util::DirEntry;
+
+TEST_CASE("util::fallocate")
+{
+  TestContext test_context;
+
+  const char filename[] = "test-file";
+
+  CHECK(
+    util::fallocate(util::Fd(creat(filename, S_IRUSR | S_IWUSR)).get(), 10000));
+  CHECK(DirEntry(filename).size() == 10000);
+
+  CHECK(util::fallocate(
+    util::Fd(open(filename, O_RDWR, S_IRUSR | S_IWUSR)).get(), 5000));
+  CHECK(DirEntry(filename).size() == 10000);
+
+  CHECK(util::fallocate(
+    util::Fd(open(filename, O_RDWR, S_IRUSR | S_IWUSR)).get(), 20000));
+  CHECK(DirEntry(filename).size() == 20000);
+}
 
 TEST_CASE("util::likely_size_on_disk")
 {
@@ -92,7 +122,7 @@ TEST_CASE("util::read_file and util::write_file, binary data")
 
   std::vector<uint8_t> expected;
   for (size_t i = 0; i < 512; ++i) {
-    expected.push_back((32 + i) % 256);
+    expected.push_back(static_cast<uint8_t>((32 + i) % 256));
   }
 
   CHECK(util::write_file("test", expected));
@@ -172,5 +202,65 @@ TEST_CASE("util::read_file_part")
   {
     auto data = util::read_file_part<std::string>("test", 3, 2);
     CHECK(*data == "an");
+  }
+}
+
+TEST_CASE("util::traverse_directory")
+{
+  TestContext test_context;
+
+  REQUIRE(fs::create_directories("dir-with-subdir-and-file/subdir"));
+  util::write_file("dir-with-subdir-and-file/subdir/f", "");
+  REQUIRE(fs::create_directory("dir-with-files"));
+  util::write_file("dir-with-files/f1", "");
+  util::write_file("dir-with-files/f2", "");
+  REQUIRE(fs::create_directory("empty-dir"));
+
+  std::vector<std::string> visited;
+  auto visitor = [&visited](const auto& de) {
+    visited.push_back(FMT("[{}] {}", de.is_directory() ? 'd' : 'f', de.path()));
+  };
+
+  SUBCASE("traverse nonexistent path")
+  {
+    CHECK(util::traverse_directory("nonexistent", visitor).error()
+          == "Failed to traverse nonexistent: No such file or directory");
+    CHECK(visited.size() == 0);
+  }
+
+  SUBCASE("traverse file")
+  {
+    CHECK(util::traverse_directory("dir-with-subdir-and-file/subdir/f", visitor)
+            .error()
+          == "Failed to traverse dir-with-subdir-and-file/subdir/f: Not a directory");
+    CHECK(visited.size() == 0);
+  }
+
+  SUBCASE("traverse empty directory")
+  {
+    CHECK_NOTHROW(util::traverse_directory("empty-dir", visitor));
+    REQUIRE(visited.size() == 1);
+    CHECK(visited[0] == "[d] empty-dir");
+  }
+
+  SUBCASE("traverse directory with files")
+  {
+    CHECK_NOTHROW(util::traverse_directory("dir-with-files", visitor));
+    REQUIRE(visited.size() == 3);
+    fs::path f1("[f] dir-with-files/f1");
+    fs::path f2("[f] dir-with-files/f2");
+    CHECK(((visited[0] == f1 && visited[1] == f2)
+           || (visited[0] == f2 && visited[1] == f1)));
+    CHECK(visited[2] == "[d] dir-with-files");
+  }
+
+  SUBCASE("traverse directory hierarchy")
+  {
+    CHECK_NOTHROW(
+      util::traverse_directory("dir-with-subdir-and-file", visitor));
+    REQUIRE(visited.size() == 3);
+    CHECK(visited[0] == fs::path("[f] dir-with-subdir-and-file/subdir/f"));
+    CHECK(visited[1] == fs::path("[d] dir-with-subdir-and-file/subdir"));
+    CHECK(visited[2] == "[d] dir-with-subdir-and-file");
   }
 }

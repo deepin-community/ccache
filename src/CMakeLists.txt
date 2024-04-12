@@ -1,20 +1,13 @@
 set(
   source_files
   Args.cpp
-  AtomicFile.cpp
   Config.cpp
   Context.cpp
   Depfile.cpp
-  Fd.cpp
   Hash.cpp
-  Logging.cpp
   ProgressBar.cpp
-  Stat.cpp
-  TemporaryFile.cpp
-  ThreadPool.cpp
   Util.cpp
   argprocessing.cpp
-  assertions.cpp
   ccache.cpp
   compopt.cpp
   execute.cpp
@@ -31,9 +24,7 @@ if(MTR_ENABLED)
   list(APPEND source_files MiniTrace.cpp)
 endif()
 
-if(WIN32)
-  list(APPEND source_files Win32Util.cpp)
-else()
+if(NOT WIN32)
   list(APPEND source_files SignalHandler.cpp)
 endif()
 

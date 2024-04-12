@@ -21,19 +21,17 @@
 #include "Args.hpp"
 #include "Config.hpp"
 #include "Context.hpp"
-#include "Hash.hpp"
-#include "Logging.hpp"
-#include "Stat.hpp"
-#include "Util.hpp"
-#include "Win32Util.hpp"
 #include "execute.hpp"
 #include "macroskip.hpp"
 
 #include <core/exceptions.hpp>
-#include <core/wincompat.hpp>
-#include <fmtmacros.hpp>
+#include <util/DirEntry.hpp>
 #include <util/file.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
 #include <util/string.hpp>
+#include <util/time.hpp>
+#include <util/wincompat.hpp>
 
 #ifdef INODE_CACHE_SUPPORTED
 #  include "InodeCache.hpp"
@@ -177,7 +175,7 @@ check_for_temporal_macros_avx2(std::string_view str)
 
 HashSourceCodeResult
 do_hash_file(const Context& ctx,
-             Digest& digest,
+             Hash::Digest& digest,
              const std::string& path,
              size_t size_hint,
              bool check_temporal_macros)
@@ -187,9 +185,10 @@ do_hash_file(const Context& ctx,
     check_temporal_macros ? InodeCache::ContentType::checked_for_temporal_macros
                           : InodeCache::ContentType::raw;
   if (ctx.config.inode_cache()) {
-    const auto result = ctx.inode_cache.get(path, content_type, digest);
+    const auto result = ctx.inode_cache.get(path, content_type);
     if (result) {
-      return *result;
+      digest = result->second;
+      return result->first;
     }
   }
 #else
@@ -233,7 +232,7 @@ check_for_temporal_macros(std::string_view str)
 
 HashSourceCodeResult
 hash_source_code_file(const Context& ctx,
-                      Digest& digest,
+                      Hash::Digest& digest,
                       const std::string& path,
                       size_t size_hint)
 {
@@ -263,13 +262,13 @@ hash_source_code_file(const Context& ctx,
   // macro expansions.
 
   Hash hash;
-  hash.hash(digest.to_string());
+  hash.hash(util::format_digest(digest));
 
   if (result.contains(HashSourceCode::found_date)) {
     LOG("Found __DATE__ in {}", path);
 
     hash.hash_delimiter("date");
-    auto now = Util::localtime();
+    auto now = util::localtime();
     if (!now) {
       result.insert(HashSourceCode::error);
       return result;
@@ -291,13 +290,13 @@ hash_source_code_file(const Context& ctx,
   if (result.contains(HashSourceCode::found_timestamp)) {
     LOG("Found __TIMESTAMP__ in {}", path);
 
-    const auto stat = Stat::stat(path);
-    if (!stat) {
+    util::DirEntry dir_entry(path);
+    if (!dir_entry.is_regular_file()) {
       result.insert(HashSourceCode::error);
       return result;
     }
 
-    auto modified_time = Util::localtime(stat.mtime());
+    auto modified_time = util::localtime(dir_entry.mtime());
     if (!modified_time) {
       result.insert(HashSourceCode::error);
       return result;
@@ -322,7 +321,7 @@ hash_source_code_file(const Context& ctx,
 
 bool
 hash_binary_file(const Context& ctx,
-                 Digest& digest,
+                 Hash::Digest& digest,
                  const std::string& path,
                  size_t size_hint)
 {
@@ -332,10 +331,10 @@ hash_binary_file(const Context& ctx,
 bool
 hash_binary_file(const Context& ctx, Hash& hash, const std::string& path)
 {
-  Digest digest;
+  Hash::Digest digest;
   const bool success = hash_binary_file(ctx, digest, path);
   if (success) {
-    hash.hash(digest.to_string());
+    hash.hash(util::format_digest(digest));
   }
   return success;
 }
@@ -374,7 +373,7 @@ hash_command_output(Hash& hash,
 
   auto argv = args.to_argv();
   LOG("Executing compiler check command {}",
-      Util::format_argv_for_logging(argv.data()));
+      util::format_argv_for_logging(argv.data()));
 
 #ifdef _WIN32
   PROCESS_INFORMATION pi;
@@ -382,7 +381,7 @@ hash_command_output(Hash& hash,
   STARTUPINFO si;
   memset(&si, 0x00, sizeof(si));
 
-  std::string path = find_executable_in_path(args[0], getenv("PATH"));
+  auto path = find_executable_in_path(args[0], getenv("PATH")).string();
   if (path.empty()) {
     path = args[0];
   }
@@ -406,7 +405,7 @@ hash_command_output(Hash& hash,
   if (using_cmd_exe) {
     win32args = adjusted_command; // quoted
   } else {
-    win32args = Win32Util::argv_to_string(argv.data(), sh);
+    win32args = util::format_argv_as_win32_command_string(argv.data(), sh);
   }
   BOOL ret = CreateProcess(path.c_str(),
                            const_cast<char*>(win32args.c_str()),
@@ -491,7 +490,7 @@ hash_multicommand_output(Hash& hash,
                          const std::string& command,
                          const std::string& compiler)
 {
-  for (const std::string& cmd : Util::split_into_strings(command, ";")) {
+  for (const std::string& cmd : util::split_into_strings(command, ";")) {
     if (!hash_command_output(hash, cmd, compiler)) {
       return false;
     }

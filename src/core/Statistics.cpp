@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,11 +19,12 @@
 #include "Statistics.hpp"
 
 #include <Config.hpp>
-#include <Logging.hpp>
 #include <Util.hpp>
-#include <fmtmacros.hpp>
 #include <util/TextTable.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
 #include <util/string.hpp>
+#include <util/time.hpp>
 
 #include <algorithm>
 
@@ -74,6 +75,9 @@ const StatisticsField k_statistics_fields[] = {
   // that requires an argument or failure to read a file specified by a compiler
   // option argument.
   FIELD(bad_compiler_arguments, "Bad compiler arguments", FLAG_UNCACHEABLE),
+
+  // An input file could not be read or parsed (see the debug log for details).
+  FIELD(bad_input_file, "Could not read or parse input file", FLAG_ERROR),
 
   // The output path specified with -o could not be written to.
   FIELD(bad_output_file, "Could not write to output file", FLAG_ERROR),
@@ -137,7 +141,7 @@ const StatisticsField k_statistics_fields[] = {
   // A cacheable call resulted in a miss when attempting direct mode lookup.
   FIELD(direct_cache_miss, nullptr),
 
-  // Ccache was disabled by a ccache:disable string in the source code file.
+  // Ccache was disabled by a comment in the source code file.
   FIELD(disabled, "Ccache disabled", FLAG_UNCACHEABLE),
 
   // Failure reading a file specified by extra_files_to_hash/CCACHE_EXTRAFILES.
@@ -171,6 +175,10 @@ const StatisticsField k_statistics_fields[] = {
   // situations, e.g. if one ccache instance is about to get a file from the
   // cache while another instance removed the file as part of cache cleanup.
   FIELD(missing_cache_file, "Missing cache file", FLAG_ERROR),
+
+  // An input file was modified during compilation.
+  FIELD(
+    modified_input_file, "Input file modified during compilation", FLAG_ERROR),
 
   // The compiler was called to compile multiple source files in one go. This is
   // not supported by ccache.
@@ -263,7 +271,7 @@ format_timestamp(const util::TimePoint& value)
   if (value.sec() == 0) {
     return "never";
   } else {
-    const auto tm = Util::localtime(value);
+    const auto tm = util::localtime(value);
     char buffer[100] = "?";
     if (tm) {
       strftime(buffer, sizeof(buffer), "%c", &*tm);
@@ -279,11 +287,15 @@ percent(const uint64_t nominator, const uint64_t denominator)
     return "";
   }
 
-  std::string result = FMT("({:5.2f}%)", (100.0 * nominator) / denominator);
+  std::string result = FMT("({:5.2f}%)",
+                           (100.0 * static_cast<double>(nominator))
+                             / static_cast<double>(denominator));
   if (result.length() <= 8) {
     return result;
   } else {
-    return FMT("({:5.1f}%)", (100.0 * nominator) / denominator);
+    return FMT("({:5.1f}%)",
+               (100.0 * static_cast<double>(nominator))
+                 / static_cast<double>(denominator));
   }
 }
 
@@ -452,15 +464,17 @@ Statistics::format_human_readable(const Config& config,
     table.add_heading("Local storage:");
   }
   if (!from_log) {
-    std::vector<C> size_cells{
-      FMT("  Cache size ({}):", size_unit),
-      C(FMT("{:.1f}", static_cast<double>(local_size) / size_divider))
-        .right_align()};
+    std::vector<C> size_cells{FMT("  Cache size ({}):", size_unit),
+                              C(FMT("{:.1f}",
+                                    static_cast<double>(local_size)
+                                      / static_cast<double>(size_divider)))
+                                .right_align()};
     if (config.max_size() != 0) {
       size_cells.emplace_back("/");
-      size_cells.emplace_back(
-        C(FMT("{:.1f}", static_cast<double>(config.max_size()) / size_divider))
-          .right_align());
+      size_cells.emplace_back(C(FMT("{:.1f}",
+                                    static_cast<double>(config.max_size())
+                                      / static_cast<double>(size_divider)))
+                                .right_align());
       size_cells.emplace_back(percent(local_size, config.max_size()));
     }
     table.add_row(size_cells);
@@ -510,18 +524,25 @@ Statistics::format_human_readable(const Config& config,
 }
 
 std::string
-Statistics::format_machine_readable(const util::TimePoint& last_updated) const
+Statistics::format_machine_readable(const Config& config,
+                                    const util::TimePoint& last_updated) const
 {
   std::vector<std::string> lines;
 
   lines.push_back(FMT("stats_updated_timestamp\t{}\n", last_updated.sec()));
 
+  auto add_line = [&](auto id, auto value) {
+    lines.push_back(FMT("{}\t{}\n", id, value));
+  };
+
   for (const auto& field : k_statistics_fields) {
     if (!(field.flags & FLAG_NEVER)) {
-      lines.push_back(
-        FMT("{}\t{}\n", field.id, m_counters.get(field.statistic)));
+      add_line(field.id, m_counters.get(field.statistic));
     }
   }
+
+  add_line("max_cache_size_kibibyte", config.max_size() / 1024);
+  add_line("max_files_in_cache", config.max_files());
 
   std::sort(lines.begin(), lines.end());
   return util::join(lines, "");

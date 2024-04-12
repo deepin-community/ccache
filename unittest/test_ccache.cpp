@@ -18,20 +18,25 @@
 
 #include "../src/Context.hpp"
 #include "../src/ccache.hpp"
-#include "../src/fmtmacros.hpp"
 #include "TestUtil.hpp"
 
-#include <core/wincompat.hpp>
 #include <util/file.hpp>
+#include <util/filesystem.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/path.hpp>
+#include <util/wincompat.hpp>
 
 #include "third_party/doctest.h"
 
 #include <optional>
+#include <string>
+#include <vector>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif
 
+namespace fs = util::filesystem;
 using TestUtil::TestContext;
 
 TEST_SUITE_BEGIN("ccache");
@@ -190,14 +195,63 @@ TEST_CASE("guess_compiler")
 #ifndef _WIN32
   SUBCASE("Follow symlink to actual compiler")
   {
-    const auto cwd = Util::get_actual_cwd();
-    util::write_file(FMT("{}/gcc", cwd), "");
-    CHECK(symlink("gcc", FMT("{}/intermediate", cwd).c_str()) == 0);
-    const auto cc = FMT("{}/cc", cwd);
-    CHECK(symlink("intermediate", cc.c_str()) == 0);
+    const auto cwd = fs::path(util::actual_cwd());
+    util::write_file(cwd / "gcc", "");
+    CHECK(fs::create_symlink("gcc", cwd / "intermediate"));
+    const auto cc = cwd / "cc";
+    CHECK(fs::create_symlink("intermediate", cc));
 
     CHECK(guess_compiler(cc) == CompilerType::gcc);
   }
+
+  SUBCASE("Classify clang-cl symlink to clang")
+  {
+    const auto cwd = fs::path(util::actual_cwd());
+    util::write_file(cwd / "clang", "");
+    const auto clang_cl = cwd / "clang-cl";
+    CHECK(fs::create_symlink("clang", clang_cl));
+
+    CHECK(guess_compiler(clang_cl) == CompilerType::clang_cl);
+  }
+#endif
+}
+
+TEST_CASE("is_ccache_executable")
+{
+  CHECK(is_ccache_executable("ccache"));
+  CHECK(is_ccache_executable("ccache-1.2.3"));
+  CHECK(!is_ccache_executable("fooccache"));
+  CHECK(!is_ccache_executable("gcc"));
+#ifdef _WIN32
+  CHECK(is_ccache_executable("CCACHE"));
+  CHECK(is_ccache_executable("CCACHE.exe"));
+  CHECK(is_ccache_executable("CCACHE-1.2.3"));
+  CHECK(is_ccache_executable("CCACHE.EXE"));
+  CHECK(is_ccache_executable("CCACHE-1.2.3.EXE"));
+#endif
+}
+
+TEST_CASE("file_path_matches_dir_prefix_or_file")
+{
+  CHECK(file_path_matches_dir_prefix_or_file("aa", "aa"));
+  CHECK(!file_path_matches_dir_prefix_or_file("aaa", "aa"));
+  CHECK(!file_path_matches_dir_prefix_or_file("aa", "aaa"));
+  CHECK(file_path_matches_dir_prefix_or_file("aa/", "aa"));
+
+  CHECK(file_path_matches_dir_prefix_or_file("/aa/bb", "/aa/bb"));
+  CHECK(!file_path_matches_dir_prefix_or_file("/aa/b", "/aa/bb"));
+  CHECK(!file_path_matches_dir_prefix_or_file("/aa/bbb", "/aa/bb"));
+
+  CHECK(file_path_matches_dir_prefix_or_file("/aa", "/aa/bb"));
+  CHECK(file_path_matches_dir_prefix_or_file("/aa/", "/aa/bb"));
+  CHECK(!file_path_matches_dir_prefix_or_file("/aa/bb", "/aa"));
+
+#ifdef _WIN32
+  CHECK(file_path_matches_dir_prefix_or_file("\\aa", "\\aa\\bb"));
+  CHECK(file_path_matches_dir_prefix_or_file("\\aa\\", "\\aa\\bb"));
+#else
+  CHECK(!file_path_matches_dir_prefix_or_file("\\aa", "\\aa\\bb"));
+  CHECK(!file_path_matches_dir_prefix_or_file("\\aa\\", "\\aa\\bb"));
 #endif
 }
 

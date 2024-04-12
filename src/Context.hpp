@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -21,15 +21,16 @@
 #include "Args.hpp"
 #include "ArgsInfo.hpp"
 #include "Config.hpp"
-#include "Digest.hpp"
-#include "File.hpp"
 #include "MiniTrace.hpp"
-#include "NonCopyable.hpp"
+
+#include <util/FileStream.hpp>
+#include <util/NonCopyable.hpp>
 
 #ifdef INODE_CACHE_SUPPORTED
 #  include "InodeCache.hpp"
 #endif
 
+#include <Hash.hpp>
 #include <core/Manifest.hpp>
 #include <storage/Storage.hpp>
 #include <util/TimePoint.hpp>
@@ -43,7 +44,7 @@
 
 class SignalHandler;
 
-class Context : NonCopyable
+class Context : util::NonCopyable
 {
 public:
   Context();
@@ -66,15 +67,8 @@ public:
   // The original argument list.
   Args orig_args;
 
-  // Time of ccache invocation.
-  util::TimePoint time_of_invocation;
-
-  // Time of compilation. Used to see if include files have changed after
-  // compilation.
-  util::TimePoint time_of_compilation;
-
   // Files included by the preprocessor and their hashes.
-  std::unordered_map<std::string, Digest> included_files;
+  std::unordered_map<std::string, Hash::Digest> included_files;
 
   // Have we tried and failed to get colored diagnostics?
   bool diagnostics_color_failed = false;
@@ -86,7 +80,7 @@ public:
   util::Bytes cpp_stderr_data;
 
   // Headers (or directories with headers) to ignore in manifest mode.
-  std::vector<std::string> ignore_header_paths;
+  std::vector<std::filesystem::path> ignore_header_paths;
 
   // Storage (fronting local and remote storage backends).
   storage::Storage storage;
@@ -99,12 +93,15 @@ public:
   mutable InodeCache inode_cache;
 #endif
 
+  // Time of ccache invocation.
+  util::TimePoint time_of_invocation;
+
   // PID of currently executing compiler that we have started, if any. 0 means
   // no ongoing compilation.
   pid_t compiler_pid = 0;
 
   // Files used by the hash debugging functionality.
-  std::vector<File> hash_debug_files;
+  std::vector<util::FileStream> hash_debug_files;
 
   // Options to ignore for the hash.
   const std::vector<std::string>& ignore_options() const;

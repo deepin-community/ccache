@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2022 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2023 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,11 +18,9 @@
 
 #include "Args.hpp"
 
-#include "Util.hpp"
-
-#include <Logging.hpp>
 #include <core/exceptions.hpp>
 #include <util/file.hpp>
+#include <util/logging.hpp>
 #include <util/string.hpp>
 
 Args::Args(Args&& other) noexcept : m_args(std::move(other.m_args))
@@ -41,7 +39,7 @@ Args
 Args::from_string(std::string_view command)
 {
   Args args;
-  for (const std::string& word : Util::split_into_strings(command, " \t\r\n")) {
+  for (const std::string& word : util::split_into_strings(command, " \t\r\n")) {
     args.push_back(word);
   }
   return args;

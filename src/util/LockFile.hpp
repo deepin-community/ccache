@@ -18,22 +18,22 @@
 
 #pragma once
 
-#include <NonCopyable.hpp>
 #include <util/LongLivedLockFileManager.hpp>
+#include <util/NonCopyable.hpp>
 #include <util/TimePoint.hpp>
 
+#include <filesystem>
 #include <optional>
-#include <string>
 
 namespace util {
 
 // Unless make_long_lived is called, the lock is expected to be released shortly
 // after being acquired - if it is held for more than two seconds it risks being
 // considered stale by another client.
-class LockFile : NonCopyable
+class LockFile : util::NonCopyable
 {
 public:
-  explicit LockFile(const std::string& path);
+  explicit LockFile(const std::filesystem::path& path);
   LockFile(LockFile&& other) noexcept;
 
   LockFile& operator=(LockFile&& other) noexcept;
@@ -58,10 +58,10 @@ public:
   bool acquired() const;
 
 private:
-  std::string m_lock_file;
+  std::filesystem::path m_lock_file;
 #ifndef _WIN32
   LongLivedLockFileManager* m_lock_manager = nullptr;
-  std::string m_alive_file;
+  std::filesystem::path m_alive_file;
   bool m_acquired;
 #else
   void* m_handle;
@@ -70,7 +70,7 @@ private:
   bool acquire(bool blocking);
 #ifndef _WIN32
   bool do_acquire(bool blocking);
-  std::optional<util::TimePoint> get_last_lock_update();
+  std::optional<TimePoint> get_last_lock_update();
 #else
   void* do_acquire(bool blocking);
 #endif

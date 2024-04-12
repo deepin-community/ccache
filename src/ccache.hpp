@@ -22,6 +22,7 @@
 #include <Args.hpp>
 #include <Config.hpp>
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -51,4 +52,11 @@ ArgvParts split_argv(int argc, const char* const* argv);
 void find_compiler(Context& ctx,
                    const FindExecutableFunction& find_executable_function,
                    bool masquerading_as_compiler);
-CompilerType guess_compiler(std::string_view path);
+
+CompilerType guess_compiler(const std::filesystem::path& path);
+
+bool is_ccache_executable(const std::filesystem::path& path);
+
+bool file_path_matches_dir_prefix_or_file(
+  const std::filesystem::path& dir_prefix_or_file,
+  const std::filesystem::path& file_path);
