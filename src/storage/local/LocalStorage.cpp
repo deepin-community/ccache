@@ -18,36 +18,61 @@
 
 #include "LocalStorage.hpp"
 
-#include <AtomicFile.hpp>
 #include <Config.hpp>
 #include <Context.hpp>
-#include <File.hpp>
-#include <Logging.hpp>
 #include <MiniTrace.hpp>
-#include <TemporaryFile.hpp>
-#include <ThreadPool.hpp>
 #include <Util.hpp>
-#include <assertions.hpp>
+#include <core/AtomicFile.hpp>
 #include <core/CacheEntry.hpp>
 #include <core/FileRecompressor.hpp>
 #include <core/Manifest.hpp>
-#include <core/Result.hpp>
 #include <core/Statistics.hpp>
+#include <core/common.hpp>
 #include <core/exceptions.hpp>
-#include <core/wincompat.hpp>
-#include <fmtmacros.hpp>
-#include <storage/local/StatsFile.hpp>
-#include <storage/local/util.hpp>
 #include <util/Duration.hpp>
+#include <util/FileStream.hpp>
+#include <util/TemporaryFile.hpp>
 #include <util/TextTable.hpp>
+#include <util/ThreadPool.hpp>
+#include <util/assertions.hpp>
 #include <util/expected.hpp>
 #include <util/file.hpp>
+#include <util/filesystem.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
+#include <util/process.hpp>
 #include <util/string.hpp>
-
-#include <third_party/fmt/core.h>
+#include <util/wincompat.hpp>
 
 #ifdef INODE_CACHE_SUPPORTED
 #  include <InodeCache.hpp>
+#endif
+
+#include <fcntl.h>
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>
+#endif
+
+#ifdef __linux__
+#  ifdef HAVE_SYS_IOCTL_H
+#    include <sys/ioctl.h>
+#  endif
+#  ifdef HAVE_LINUX_FS_H
+#    include <linux/fs.h>
+#    ifndef FICLONE
+#      define FICLONE _IOW(0x94, 9, int)
+#    endif
+#    define FILE_CLONING_SUPPORTED 1
+#  endif
+#endif
+
+#ifdef __APPLE__
+#  ifdef HAVE_SYS_CLONEFILE_H
+#    include <sys/clonefile.h>
+#    ifdef CLONE_NOOWNERCOPY
+#      define FILE_CLONING_SUPPORTED 1
+#    endif
+#  endif
 #endif
 
 #include <algorithm>
@@ -58,12 +83,12 @@
 #include <string>
 #include <utility>
 
-#ifdef HAVE_UNISTD_H
-#  include <unistd.h>
-#endif
+namespace fs = util::filesystem;
 
+using core::AtomicFile;
 using core::Statistic;
 using core::StatisticsCounters;
+using util::DirEntry;
 
 namespace storage::local {
 
@@ -136,6 +161,15 @@ struct Level1Counters
 
 } // namespace
 
+// Return size change in KiB between `old_dir_entry` and `new_dir_entry`.
+static int64_t
+kibibyte_size_diff(const DirEntry& old_dir_entry, const DirEntry& new_dir_entry)
+{
+  return (static_cast<int64_t>(new_dir_entry.size_on_disk())
+          - static_cast<int64_t>(old_dir_entry.size_on_disk()))
+         / 1024;
+}
+
 static void
 set_counters(const StatsFile& stats_file, const Level1Counters& level_1_cs)
 {
@@ -181,29 +215,101 @@ calculate_wanted_cache_level(const uint64_t files_in_level_1)
 }
 
 static void
-delete_file(const std::string& path,
-            const uint64_t size,
+delete_file(const DirEntry& dir_entry,
             uint64_t& cache_size,
             uint64_t& files_in_cache)
 {
-  const bool deleted = Util::unlink_safe(path, Util::UnlinkLog::ignore_failure);
-  if (!deleted && errno != ENOENT && errno != ESTALE) {
-    LOG("Failed to unlink {} ({})", path, strerror(errno));
+  const auto result =
+    util::remove_nfs_safe(dir_entry.path().string(), util::LogFailure::no);
+  if (!result && result.error().value() != ENOENT
+      && result.error().value() != ESTALE) {
+    LOG("Failed to unlink {} ({})", dir_entry.path().string(), strerror(errno));
   } else {
     // The counters are intentionally subtracted even if there was no file to
     // delete since the final cache size calculation will be incorrect if they
     // aren't. (This can happen when there are several parallel ongoing
     // cleanups of the same directory.)
-    cache_size -= size;
+    cache_size -= dir_entry.size_on_disk();
     --files_in_cache;
   }
 }
+
+#ifdef FILE_CLONING_SUPPORTED
+
+// Clone a file from `src` to `dest`. If `via_tmp_file` is true, `src` is cloned
+// to a temporary file and then renamed to `dest`. Throws `core::Error` on
+// error.
+static void
+clone_file(const std::string& src, const std::string& dest, bool via_tmp_file)
+{
+#  if defined(__linux__)
+  util::Fd src_fd(open(src.c_str(), O_RDONLY));
+  if (!src_fd) {
+    throw core::Error(FMT("{}: {}", src, strerror(errno)));
+  }
+
+  util::Fd dest_fd;
+  std::string tmp_file;
+  if (via_tmp_file) {
+    auto temp_file =
+      util::value_or_throw<core::Fatal>(util::TemporaryFile::create(dest));
+    dest_fd = std::move(temp_file.fd);
+    tmp_file = std::move(temp_file.path);
+  } else {
+    dest_fd = util::Fd(
+      open(dest.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666));
+    if (!dest_fd) {
+      throw core::Error(FMT("{}: {}", src, strerror(errno)));
+    }
+  }
+
+  if (ioctl(*dest_fd, FICLONE, *src_fd) != 0) {
+    throw core::Error(strerror(errno));
+  }
+
+  dest_fd.close();
+  src_fd.close();
+
+  if (via_tmp_file) {
+    const auto result = fs::rename(tmp_file, dest);
+    if (!result) {
+      throw core::Error(FMT("failed to rename {} to {}: {}",
+                            tmp_file,
+                            dest,
+                            result.error().message()));
+    }
+  }
+#  elif defined(__APPLE__)
+  (void)via_tmp_file;
+  if (clonefile(src.c_str(), dest.c_str(), CLONE_NOOWNERCOPY) != 0) {
+    throw core::Error(strerror(errno));
+  }
+#  else
+  (void)src;
+  (void)dest;
+  (void)via_tmp_file;
+  throw core::Error(strerror(EOPNOTSUPP));
+#  endif
+}
+
+#endif // FILE_CLONING_SUPPORTED
 
 struct CleanDirResult
 {
   Level2Counters before;
   Level2Counters after;
 };
+
+template<typename T>
+static double
+ratio(T numerator, T denominator)
+{
+  if (denominator == 0) {
+    return 0.0;
+  } else {
+    return static_cast<double>(numerator) / static_cast<double>(denominator);
+  }
+}
 
 static CleanDirResult
 clean_dir(
@@ -227,25 +333,26 @@ clean_dir(
     raw_files_map;
 
   for (size_t i = 0; i < files.size();
-       ++i, progress_receiver(1.0 / 3 + 1.0 * i / files.size() / 3)) {
+       ++i, progress_receiver(1.0 / 3 + 1.0 * ratio(i, files.size()) / 3)) {
     const auto& file = files[i];
 
-    if (!file.is_regular()) {
+    if (!file.is_regular_file()) {
       // Not a file or missing file.
       continue;
     }
 
     // Delete any tmp files older than 1 hour right away.
     if (file.mtime() + util::Duration(3600) < current_time
-        && TemporaryFile::is_tmp_file(file.path())) {
-      Util::unlink_tmp(file.path());
+        && util::TemporaryFile::is_tmp_file(file.path())) {
+      util::remove(file.path().string());
       continue;
     }
 
     if (namespace_ && file_type_from_path(file.path()) == FileType::raw) {
       const auto result_filename =
-        FMT("{}R", file.path().substr(0, file.path().length() - 2));
-      raw_files_map[result_filename].push_back(file.path());
+        FMT("{}R",
+            file.path().string().substr(0, file.path().string().length() - 2));
+      raw_files_map[result_filename].push_back(file.path().string());
     }
 
     cache_size += file.size_on_disk();
@@ -264,7 +371,7 @@ clean_dir(
 
   bool cleaned = false;
   for (size_t i = 0; i < files.size();
-       ++i, progress_receiver(2.0 / 3 + 1.0 * i / files.size() / 3)) {
+       ++i, progress_receiver(2.0 / 3 + 1.0 * ratio(i, files.size()) / 3)) {
     const auto& file = files[i];
 
     if (!file || file.is_directory()) {
@@ -281,7 +388,7 @@ clean_dir(
 
     if (namespace_) {
       try {
-        core::CacheEntry::Header header(file.path());
+        core::CacheEntry::Header header(file.path().string());
         if (header.namespace_ != *namespace_) {
           continue;
         }
@@ -293,19 +400,16 @@ clean_dir(
       // For namespace eviction we need to remove raw files based on result
       // filename since they don't have a header.
       if (file_type_from_path(file.path()) == FileType::result) {
-        const auto entry = raw_files_map.find(file.path());
+        const auto entry = raw_files_map.find(file.path().string());
         if (entry != raw_files_map.end()) {
           for (const auto& raw_file : entry->second) {
-            delete_file(raw_file,
-                        Stat::lstat(raw_file).size_on_disk(),
-                        cache_size,
-                        files_in_cache);
+            delete_file(DirEntry(raw_file), cache_size, files_in_cache);
           }
         }
       }
     }
 
-    delete_file(file.path(), file.size_on_disk(), cache_size, files_in_cache);
+    delete_file(file, cache_size, files_in_cache);
     cleaned = true;
   }
 
@@ -322,13 +426,14 @@ clean_dir(
 }
 
 FileType
-file_type_from_path(std::string_view path)
+file_type_from_path(const fs::path& path)
 {
-  if (util::ends_with(path, "M")) {
+  auto filename = path.filename().string();
+  if (util::ends_with(filename, "M")) {
     return FileType::manifest;
-  } else if (util::ends_with(path, "R")) {
+  } else if (util::ends_with(filename, "R")) {
     return FileType::result;
-  } else if (util::ends_with(path, "W")) {
+  } else if (util::ends_with(filename, "W")) {
     return FileType::raw;
   } else {
     return FileType::unknown;
@@ -346,8 +451,8 @@ LocalStorage::finalize()
     // Pseudo-randomly choose one of the stats files in the 256 level 2
     // directories.
     const auto bucket = getpid() % 256;
-    const uint8_t l1_index = bucket / 16;
-    const uint8_t l2_index = bucket % 16;
+    const uint8_t l1_index = static_cast<uint8_t>(bucket / 16);
+    const uint8_t l2_index = static_cast<uint8_t>(bucket % 16);
     const auto l2_stats_file = get_stats_file(l1_index, l2_index);
 
     uint64_t l2_files_in_cache = 0;
@@ -383,18 +488,18 @@ LocalStorage::finalize()
 }
 
 std::optional<util::Bytes>
-LocalStorage::get(const Digest& key, const core::CacheEntryType type)
+LocalStorage::get(const Hash::Digest& key, const core::CacheEntryType type)
 {
   MTR_SCOPE("local_storage", "get");
 
   std::optional<util::Bytes> return_value;
 
   const auto cache_file = look_up_cache_file(key, type);
-  if (cache_file.stat) {
+  if (cache_file.dir_entry.is_regular_file()) {
     const auto value = util::read_file<util::Bytes>(cache_file.path);
     if (value) {
       LOG("Retrieved {} from local storage ({})",
-          key.to_string(),
+          util::format_digest(key),
           cache_file.path);
 
       // Update modification timestamp to save file from LRU cleanup.
@@ -405,7 +510,7 @@ LocalStorage::get(const Digest& key, const core::CacheEntryType type)
       LOG("Failed to read {}: {}", cache_file.path, value.error());
     }
   } else {
-    LOG("No {} in local storage", key.to_string());
+    LOG("No {} in local storage", util::format_digest(key));
   }
 
   increment_statistic(return_value ? Statistic::local_storage_read_hit
@@ -418,7 +523,7 @@ LocalStorage::get(const Digest& key, const core::CacheEntryType type)
 }
 
 void
-LocalStorage::put(const Digest& key,
+LocalStorage::put(const Hash::Digest& key,
                   const core::CacheEntryType type,
                   nonstd::span<const uint8_t> value,
                   bool only_if_missing)
@@ -426,7 +531,7 @@ LocalStorage::put(const Digest& key,
   MTR_SCOPE("local_storage", "put");
 
   const auto cache_file = look_up_cache_file(key, type);
-  if (only_if_missing && cache_file.stat) {
+  if (only_if_missing && cache_file.dir_entry.exists()) {
     LOG("Not storing {} in local storage since it already exists",
         cache_file.path);
     return;
@@ -448,7 +553,9 @@ LocalStorage::put(const Digest& key,
     return;
   }
 
-  LOG("Stored {} in local storage ({})", key.to_string(), cache_file.path);
+  LOG("Stored {} in local storage ({})",
+      util::format_digest(key),
+      cache_file.path);
   m_stored_data = true;
 
   if (!m_config.stats()) {
@@ -457,14 +564,14 @@ LocalStorage::put(const Digest& key,
 
   increment_statistic(Statistic::local_storage_write);
 
-  const auto new_stat = Stat::stat(cache_file.path, Stat::OnError::log);
-  if (!new_stat) {
+  DirEntry new_dir_entry(cache_file.path, DirEntry::LogOnError::yes);
+  if (!new_dir_entry.exists()) {
     return;
   }
 
-  int64_t files_change = cache_file.stat ? 0 : 1;
+  int64_t files_change = cache_file.dir_entry.exists() ? 0 : 1;
   int64_t size_change_kibibyte =
-    Util::size_change_kibibyte(cache_file.stat, new_stat);
+    kibibyte_size_diff(cache_file.dir_entry, new_dir_entry);
   auto counters =
     increment_files_and_size_counters(key, files_change, size_change_kibibyte);
 
@@ -480,17 +587,17 @@ LocalStorage::put(const Digest& key,
   // be done almost anywhere, but we might as well do it near the end as we save
   // the stat call if we exit early.
   util::create_cachedir_tag(
-    FMT("{}/{}", m_config.cache_dir(), key.to_string()[0]));
+    FMT("{}/{}", m_config.cache_dir(), util::format_digest(key)[0]));
 }
 
 void
-LocalStorage::remove(const Digest& key, const core::CacheEntryType type)
+LocalStorage::remove(const Hash::Digest& key, const core::CacheEntryType type)
 {
   MTR_SCOPE("local_storage", "remove");
 
   const auto cache_file = look_up_cache_file(key, type);
-  if (!cache_file.stat) {
-    LOG("No {} to remove from local storage", key.to_string());
+  if (!cache_file.dir_entry) {
+    LOG("No {} to remove from local storage", util::format_digest(key));
     return;
   }
 
@@ -501,12 +608,14 @@ LocalStorage::remove(const Digest& key, const core::CacheEntryType type)
     if (!l2_content_lock.acquire()) {
       LOG("Not removing {} due to lock failure", cache_file.path);
     }
-    Util::unlink_safe(cache_file.path);
+    util::remove_nfs_safe(cache_file.path);
   }
 
-  LOG("Removed {} from local storage ({})", key.to_string(), cache_file.path);
+  LOG("Removed {} from local storage ({})",
+      util::format_digest(key),
+      cache_file.path);
   increment_files_and_size_counters(
-    key, -1, -static_cast<int64_t>(cache_file.stat.size_on_disk() / 1024));
+    key, -1, -static_cast<int64_t>(cache_file.dir_entry.size_on_disk() / 1024));
 }
 
 std::string
@@ -525,7 +634,7 @@ LocalStorage::get_raw_file_path(std::string_view result_path,
 }
 
 std::string
-LocalStorage::get_raw_file_path(const Digest& result_key,
+LocalStorage::get_raw_file_path(const Hash::Digest& result_key,
                                 uint8_t file_number) const
 {
   const auto cache_file =
@@ -535,21 +644,21 @@ LocalStorage::get_raw_file_path(const Digest& result_key,
 
 void
 LocalStorage::put_raw_files(
-  const Digest& key,
+  const Hash::Digest& key,
   const std::vector<core::Result::Serializer::RawFile> raw_files)
 {
   const auto cache_file = look_up_cache_file(key, core::CacheEntryType::result);
-  Util::ensure_dir_exists(Util::dir_name(cache_file.path));
+  core::ensure_dir_exists(Util::dir_name(cache_file.path));
 
   int64_t files_change = 0;
   int64_t size_kibibyte_change = 0;
 
   for (auto [file_number, source_path] : raw_files) {
     const auto dest_path = get_raw_file_path(cache_file.path, file_number);
-    const auto old_stat = Stat::stat(dest_path);
+    DirEntry old_dir_entry(dest_path);
+    old_dir_entry.refresh();
     try {
-      Util::clone_hard_link_or_copy_file(
-        m_config, source_path, dest_path, true);
+      clone_hard_link_or_copy_file(source_path, dest_path, true);
       m_added_raw_files.push_back(dest_path);
     } catch (core::Error& e) {
       LOG("Failed to store {} as raw file {}: {}",
@@ -558,12 +667,63 @@ LocalStorage::put_raw_files(
           e.what());
       throw;
     }
-    const auto new_stat = Stat::stat(dest_path);
-    files_change += (new_stat ? 1 : 0) - (old_stat ? 1 : 0);
-    size_kibibyte_change += Util::size_change_kibibyte(old_stat, new_stat);
+    DirEntry new_dir_entry(dest_path);
+    files_change += (new_dir_entry ? 1 : 0) - (old_dir_entry ? 1 : 0);
+    size_kibibyte_change += kibibyte_size_diff(old_dir_entry, new_dir_entry);
   }
 
   increment_files_and_size_counters(key, files_change, size_kibibyte_change);
+}
+
+void
+LocalStorage::clone_hard_link_or_copy_file(const std::string& source,
+                                           const std::string& dest,
+                                           bool via_tmp_file) const
+{
+  if (m_config.file_clone()) {
+#ifdef FILE_CLONING_SUPPORTED
+    LOG("Cloning {} to {}", source, dest);
+    try {
+      clone_file(source, dest, via_tmp_file);
+      return;
+    } catch (core::Error& e) {
+      LOG("Failed to clone: {}", e.what());
+    }
+#else
+    LOG("Not cloning {} to {} since it's unsupported", source, dest);
+#endif
+  }
+  if (m_config.hard_link()) {
+    // Assumption: dest may already exist as a left-over file from a previous
+    // run, but it's only we who can create the file entry now so we don't try
+    // to handle a race between remove() and create_hard_link() below.
+
+    fs::remove(dest); // Ignore any error.
+    LOG("Hard linking {} to {}", source, dest);
+    if (auto result = fs::create_hard_link(source, dest); !result) {
+      LOG("Failed to hard link {} to {}: {}",
+          source,
+          dest,
+          result.error().message());
+      // Fall back to copying.
+    } else {
+      // Success.
+#ifndef _WIN32
+      if (chmod(dest.c_str(), 0444 & ~util::get_umask()) != 0) {
+        LOG("Failed to chmod {}: {}", dest.c_str(), strerror(errno));
+      }
+#endif
+      return;
+    }
+  }
+
+  LOG("Copying {} to {}", source, dest);
+  util::throw_on_error<core::Error>(
+    util::copy_file(source,
+                    dest,
+                    via_tmp_file ? util::ViaTmpFile::yes
+                                 : util::ViaTmpFile::no),
+    FMT("Failed to copy {} to {}: ", source, dest));
 }
 
 void
@@ -617,7 +777,7 @@ LocalStorage::get_all_statistics() const
       counters.increment(StatsFile(path).read());
       zero_timestamp = std::max(counters.get(Statistic::stats_zeroed_timestamp),
                                 zero_timestamp);
-      last_updated = std::max(last_updated, Stat::stat(path).mtime());
+      last_updated = std::max(last_updated, DirEntry(path).mtime());
     });
 
   counters.set(Statistic::stats_zeroed_timestamp, zero_timestamp);
@@ -662,8 +822,8 @@ LocalStorage::wipe_all(const ProgressReceiver& progress_receiver)
           l2_progress_receiver(0.5);
 
           for (size_t i = 0; i < files.size(); ++i) {
-            Util::unlink_safe(files[i].path());
-            l2_progress_receiver(0.5 + 0.5 * i / files.size());
+            util::remove_nfs_safe(files[i].path().string());
+            l2_progress_receiver(0.5 + 0.5 * ratio(i, files.size()));
           }
 
           if (!files.empty()) {
@@ -694,13 +854,13 @@ LocalStorage::get_compression_statistics(
           for (size_t i = 0; i < files.size(); ++i) {
             const auto& cache_file = files[i];
             try {
-              core::CacheEntry::Header header(cache_file.path());
+              core::CacheEntry::Header header(cache_file.path().string());
               cs.actual_size += cache_file.size_on_disk();
               cs.content_size += util::likely_size_on_disk(header.entry_size);
             } catch (core::Error&) {
               cs.incompressible_size += cache_file.size_on_disk();
             }
-            l2_progress_receiver(0.2 + 0.8 * i / files.size());
+            l2_progress_receiver(0.2 + 0.8 * ratio(i, files.size()));
           }
         });
     });
@@ -715,7 +875,7 @@ LocalStorage::recompress(const std::optional<int8_t> level,
 {
   const size_t read_ahead =
     std::max(static_cast<size_t>(10), 2 * static_cast<size_t>(threads));
-  ThreadPool thread_pool(threads, read_ahead);
+  util::ThreadPool thread_pool(threads, read_ahead);
   core::FileRecompressor recompressor;
 
   std::atomic<uint64_t> incompressible_size = 0;
@@ -748,10 +908,10 @@ LocalStorage::recompress(const std::optional<int8_t> level,
             if (file_type_from_path(file.path()) != FileType::unknown) {
               thread_pool.enqueue([=, &recompressor, &incompressible_size] {
                 try {
-                  Stat new_stat = recompressor.recompress(
+                  DirEntry new_dir_entry = recompressor.recompress(
                     file, level, core::FileRecompressor::KeepAtime::no);
                   auto size_change_kibibyte =
-                    Util::size_change_kibibyte(file, new_stat);
+                    kibibyte_size_diff(file, new_dir_entry);
                   if (size_change_kibibyte != 0) {
                     StatsFile(stats_file).update([=](auto& cs) {
                       cs.increment(Statistic::cache_size_kibibyte,
@@ -767,11 +927,11 @@ LocalStorage::recompress(const std::optional<int8_t> level,
                   incompressible_size += file.size_on_disk();
                 }
               });
-            } else if (!TemporaryFile::is_tmp_file(file.path())) {
+            } else if (!util::TemporaryFile::is_tmp_file(file.path())) {
               incompressible_size += file.size_on_disk();
             }
 
-            l2_progress_receiver(0.1 + 0.9 * i / files.size());
+            l2_progress_receiver(0.1 + 0.9 * ratio(i, files.size()));
           }
 
           if (util::ends_with(l2_dir, "f/f")) {
@@ -789,16 +949,12 @@ LocalStorage::recompress(const std::optional<int8_t> level,
     PRINT_RAW(stdout, "\n\n");
   }
 
-  const double old_ratio = recompressor.old_size() > 0
-                             ? static_cast<double>(recompressor.content_size())
-                                 / recompressor.old_size()
-                             : 0.0;
+  const double old_ratio =
+    ratio(recompressor.content_size(), recompressor.old_size());
   const double old_savings =
     old_ratio > 0.0 ? 100.0 - (100.0 / old_ratio) : 0.0;
-  const double new_ratio = recompressor.new_size() > 0
-                             ? static_cast<double>(recompressor.content_size())
-                                 / recompressor.new_size()
-                             : 0.0;
+  const double new_ratio =
+    ratio(recompressor.content_size(), recompressor.new_size());
   const double new_savings =
     new_ratio > 0.0 ? 100.0 - (100.0 / new_ratio) : 0.0;
   const int64_t size_diff = static_cast<int64_t>(recompressor.new_size())
@@ -818,9 +974,6 @@ LocalStorage::recompress(const std::optional<int8_t> level,
   const auto [content_size_quantity, content_size_unit] =
     util::split_once(human_readable(recompressor.content_size()), ' ');
   ASSERT(content_size_unit);
-  const auto [incompr_size_quantity, incompr_size_unit] =
-    util::split_once(human_readable(incompressible_size), ' ');
-  ASSERT(incompr_size_unit);
   const auto [size_diff_quantity, size_diff_unit] =
     util::split_once(human_readable(std::abs(size_diff)), ' ');
   ASSERT(size_diff_unit);
@@ -881,23 +1034,24 @@ LocalStorage::get_subdir(uint8_t l1_index, uint8_t l2_index) const
 }
 
 LocalStorage::LookUpCacheFileResult
-LocalStorage::look_up_cache_file(const Digest& key,
+LocalStorage::look_up_cache_file(const Hash::Digest& key,
                                  const core::CacheEntryType type) const
 {
-  const auto key_string = FMT("{}{}", key.to_string(), suffix_from_type(type));
+  const auto key_string =
+    FMT("{}{}", util::format_digest(key), suffix_from_type(type));
 
   for (uint8_t level = k_min_cache_levels; level <= k_max_cache_levels;
        ++level) {
     const auto path = get_path_in_cache(level, key_string);
-    const auto stat = Stat::stat(path);
-    if (stat) {
-      return {path, stat, level};
+    DirEntry dir_entry(path);
+    if (dir_entry.is_regular_file()) {
+      return {path, dir_entry, level};
     }
   }
 
   const auto shallowest_path =
     get_path_in_cache(k_min_cache_levels, key_string);
-  return {shallowest_path, Stat(), k_min_cache_levels};
+  return {shallowest_path, DirEntry(), k_min_cache_levels};
 }
 
 StatsFile
@@ -915,32 +1069,25 @@ LocalStorage::get_stats_file(uint8_t l1_index, uint8_t l2_index) const
 
 void
 LocalStorage::move_to_wanted_cache_level(const StatisticsCounters& counters,
-                                         const Digest& key,
+                                         const Hash::Digest& key,
                                          core::CacheEntryType type,
                                          const std::string& cache_file_path)
 {
   const auto wanted_level =
     calculate_wanted_cache_level(counters.get(Statistic::files_in_cache));
-  const auto wanted_path =
-    get_path_in_cache(wanted_level, key.to_string() + suffix_from_type(type));
+  const auto wanted_path = get_path_in_cache(
+    wanted_level, util::format_digest(key) + suffix_from_type(type));
   if (cache_file_path != wanted_path) {
-    Util::ensure_dir_exists(Util::dir_name(wanted_path));
+    core::ensure_dir_exists(Util::dir_name(wanted_path));
+
+    // Note: Two ccache processes may move the file at the same time, so failure
+    // to rename is OK.
     LOG("Moving {} to {}", cache_file_path, wanted_path);
-    try {
-      Util::rename(cache_file_path, wanted_path);
-    } catch (const core::Error&) {
-      // Two ccache processes may move the file at the same time, so failure
-      // to rename is OK.
-    }
+    fs::rename(cache_file_path, wanted_path);
     for (const auto& raw_file : m_added_raw_files) {
-      try {
-        Util::rename(
-          raw_file,
-          FMT("{}/{}", Util::dir_name(wanted_path), Util::base_name(raw_file)));
-      } catch (const core::Error&) {
-        // Two ccache processes may move the file at the same time, so failure
-        // to rename is OK.
-      }
+      fs::rename(
+        raw_file,
+        FMT("{}/{}", Util::dir_name(wanted_path), Util::base_name(raw_file)));
     }
   }
 }
@@ -985,12 +1132,12 @@ LocalStorage::increment_files_and_size_counters(uint8_t l1_index,
 }
 
 std::optional<core::StatisticsCounters>
-LocalStorage::increment_files_and_size_counters(const Digest& key,
+LocalStorage::increment_files_and_size_counters(const Hash::Digest& key,
                                                 int64_t files,
                                                 int64_t size_kibibyte)
 {
   return increment_files_and_size_counters(
-    key.bytes()[0] >> 4, key.bytes()[0] & 0xF, files, size_kibibyte);
+    key[0] >> 4, key[0] & 0xF, files, size_kibibyte);
 }
 
 static uint8_t
@@ -1071,7 +1218,7 @@ LocalStorage::perform_automatic_cleanup()
   auto stats_file = get_stats_file(evaluation->l1_index);
   auto counters = stats_file.read();
   if (!has_consistent_counters(counters)) {
-    // The cache_size_kibibyte counters doesn't match the 16
+    // The cache_size_kibibyte counter doesn't match the 16
     // subdir_size_kibibyte_base+i counters. This should only happen if an older
     // ccache version (before introduction of the subdir_size_kibibyte_base
     // counters) has modified the cache size after the recount_level_1_dir call
@@ -1088,7 +1235,7 @@ LocalStorage::perform_automatic_cleanup()
   // filled at steady state).
   //
   // We trim based on number of files instead of size. The main reason for this
-  // is to be more forgiving if there is one or a few large cache entries among
+  // is to be more forgiving if there are one or a few large cache entries among
   // many smaller. For example, say that there's a single 100 MB entry (maybe
   // the result of a precompiled header) and lots of small 50 kB files as well.
   // If the large file is the oldest in the subdirectory that is chosen for
@@ -1098,7 +1245,8 @@ LocalStorage::perform_automatic_cleanup()
   // practice removing much newer entries than the oldest in other
   // subdirectories. By doing cleanup based on the number of files, both example
   // scenarios are improved.
-  const uint64_t target_files = 0.9 * evaluation->total_files / 256;
+  const uint64_t target_files = static_cast<uint64_t>(
+    0.9 * static_cast<double>(evaluation->total_files) / 256);
 
   auto clean_dir_result = clean_dir(
     get_subdir(evaluation->l1_index, largest_level_2_index), 0, target_files);
@@ -1309,25 +1457,25 @@ LocalStorage::clean_internal_tempdir()
 
   const auto now = util::TimePoint::now();
   const auto cleaned_stamp = FMT("{}/.cleaned", m_config.temporary_dir());
-  const auto cleaned_stat = Stat::stat(cleaned_stamp);
-  if (cleaned_stat
-      && cleaned_stat.mtime() + k_tempdir_cleanup_interval >= now) {
+  DirEntry cleaned_dir_entry(cleaned_stamp);
+  if (cleaned_dir_entry.is_regular_file()
+      && cleaned_dir_entry.mtime() + k_tempdir_cleanup_interval >= now) {
     // No cleanup needed.
     return;
   }
 
   LOG("Cleaning up {}", m_config.temporary_dir());
-  Util::ensure_dir_exists(m_config.temporary_dir());
-  Util::traverse(m_config.temporary_dir(),
-                 [now](const std::string& path, bool is_dir) {
-                   if (is_dir) {
-                     return;
-                   }
-                   const auto st = Stat::lstat(path, Stat::OnError::log);
-                   if (st && st.mtime() + k_tempdir_cleanup_interval < now) {
-                     Util::unlink_tmp(path);
-                   }
-                 });
+  core::ensure_dir_exists(m_config.temporary_dir());
+  util::traverse_directory(m_config.temporary_dir(), [now](const auto& de) {
+    if (de.is_directory()) {
+      return;
+    }
+    if (de && de.mtime() + k_tempdir_cleanup_interval < now) {
+      util::remove(de.path());
+    }
+  }).or_else([&](const auto& error) {
+    LOG("Failed to clean up {}: {}", m_config.temporary_dir(), error);
+  });
 
   util::write_file(cleaned_stamp, "");
 }
@@ -1358,7 +1506,7 @@ std::string
 LocalStorage::get_lock_path(const std::string& name) const
 {
   auto path = FMT("{}/lock/{}", m_config.cache_dir(), name);
-  Util::ensure_dir_exists(Util::dir_name(path));
+  core::ensure_dir_exists(Util::dir_name(path));
   return path;
 }
 
@@ -1369,9 +1517,9 @@ LocalStorage::get_auto_cleanup_lock() const
 }
 
 util::LockFile
-LocalStorage::get_level_2_content_lock(const Digest& key) const
+LocalStorage::get_level_2_content_lock(const Hash::Digest& key) const
 {
-  return get_level_2_content_lock(key.bytes()[0] >> 4, key.bytes()[0] & 0xF);
+  return get_level_2_content_lock(key[0] >> 4, key[0] & 0xF);
 }
 
 util::LockFile

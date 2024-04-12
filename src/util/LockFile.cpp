@@ -18,16 +18,17 @@
 
 #include "LockFile.hpp"
 
-#include "Logging.hpp"
 #include "Util.hpp"
-#include "Win32Util.hpp"
-#include "fmtmacros.hpp"
 
-#include <core/exceptions.hpp>
-#include <core/wincompat.hpp>
+#include <util/DirEntry.hpp>
+#include <util/assertions.hpp>
+#include <util/error.hpp>
 #include <util/file.hpp>
-
-#include "third_party/fmt/core.h"
+#include <util/filesystem.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
+#include <util/process.hpp>
+#include <util/wincompat.hpp>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -37,12 +38,13 @@
 #include <random>
 #include <sstream>
 
-// Seconds.
-const double k_min_sleep_time = 0.010;
-const double k_max_sleep_time = 0.050;
+const uint32_t k_min_sleep_time_ms = 10;
+const uint32_t k_max_sleep_time_ms = 50;
 #ifndef _WIN32
 const util::Duration k_staleness_limit(2);
 #endif
+
+namespace fs = util::filesystem;
 
 namespace {
 
@@ -71,10 +73,10 @@ private:
 
 namespace util {
 
-LockFile::LockFile(const std::string& path)
-  : m_lock_file(path + ".lock"),
+LockFile::LockFile(const fs::path& path)
+  : m_lock_file(path.string() + ".lock"),
 #ifndef _WIN32
-    m_alive_file(path + ".alive"),
+    m_alive_file(path.string() + ".alive"),
     m_acquired(false)
 #else
     m_handle(INVALID_HANDLE_VALUE)
@@ -157,8 +159,8 @@ LockFile::release()
   if (m_lock_manager) {
     m_lock_manager->deregister_alive_file(m_alive_file);
   }
-  Util::unlink_tmp(m_alive_file);
-  Util::unlink_tmp(m_lock_file);
+  fs::remove(m_alive_file);
+  fs::remove(m_lock_file);
 #else
   CloseHandle(m_handle);
 #endif
@@ -195,7 +197,7 @@ LockFile::acquire(const bool blocking)
     LOG("Acquired {}", m_lock_file);
 #ifndef _WIN32
     LOG("Creating {}", m_alive_file);
-    const auto result = util::write_file(m_alive_file, "");
+    const auto result = write_file(m_alive_file, "");
     if (!result) {
       LOG("Failed to write {}: {}", m_alive_file, result.error());
     }
@@ -216,25 +218,24 @@ bool
 LockFile::do_acquire(const bool blocking)
 {
   std::stringstream ss;
-  ss << Util::get_hostname() << '-' << getpid() << '-'
-     << std::this_thread::get_id();
+  ss << get_hostname() << '-' << getpid() << '-' << std::this_thread::get_id();
   const auto content_prefix = ss.str();
 
-  util::TimePoint last_seen_activity = [this] {
+  TimePoint last_seen_activity = [this] {
     const auto last_lock_update = get_last_lock_update();
-    return last_lock_update ? *last_lock_update : util::TimePoint::now();
+    return last_lock_update ? *last_lock_update : TimePoint::now();
   }();
 
   std::string initial_content;
-  RandomNumberGenerator sleep_ms_generator(k_min_sleep_time * 1000,
-                                           k_max_sleep_time * 1000);
+  RandomNumberGenerator sleep_ms_generator(k_min_sleep_time_ms,
+                                           k_max_sleep_time_ms);
 
   while (true) {
-    const auto now = util::TimePoint::now();
+    const auto now = TimePoint::now();
     const auto my_content =
       FMT("{}-{}.{}", content_prefix, now.sec(), now.nsec_decimal_part());
 
-    if (symlink(my_content.c_str(), m_lock_file.c_str()) == 0) {
+    if (fs::create_symlink(my_content, m_lock_file)) {
       // We got the lock.
       return true;
     }
@@ -242,7 +243,7 @@ LockFile::do_acquire(const bool blocking)
     int saved_errno = errno;
     if (saved_errno == ENOENT) {
       // Directory doesn't exist?
-      if (Util::create_dir(Util::dir_name(m_lock_file))) {
+      if (fs::create_directories(m_lock_file.parent_path())) {
         // OK. Retry.
         continue;
       }
@@ -260,17 +261,20 @@ LockFile::do_acquire(const bool blocking)
       return false;
     }
 
-    std::string content = Util::read_link(m_lock_file);
-    if (content.empty()) {
-      if (errno == ENOENT) {
+    auto content_path = fs::read_symlink(m_lock_file);
+    if (!content_path) {
+      if (content_path.error() == std::errc::no_such_file_or_directory) {
         // The symlink was removed after the symlink() call above, so retry
         // acquiring it.
         continue;
       } else {
-        LOG("Could not read symlink {}: {}", m_lock_file, strerror(errno));
+        LOG("Could not read symlink {}: {}",
+            m_lock_file,
+            content_path.error().message());
         return false;
       }
     }
+    auto content = content_path->string();
 
     if (content == my_content) {
       // Lost NFS reply?
@@ -292,8 +296,7 @@ LockFile::do_acquire(const bool blocking)
       last_seen_activity = *last_lock_update;
     }
 
-    const util::Duration inactive_duration =
-      util::TimePoint::now() - last_seen_activity;
+    const Duration inactive_duration = TimePoint::now() - last_seen_activity;
 
     if (inactive_duration < k_staleness_limit) {
       LOG("Lock {} held by another process active {}.{:03} seconds ago",
@@ -306,7 +309,7 @@ LockFile::do_acquire(const bool blocking)
           m_lock_file,
           inactive_duration.sec(),
           inactive_duration.nsec_decimal_part() / 1'000'000);
-      if (!Util::unlink_tmp(m_alive_file) || !Util::unlink_tmp(m_lock_file)) {
+      if (!fs::remove(m_alive_file) || !fs::remove(m_lock_file)) {
         return false;
       }
 
@@ -336,11 +339,11 @@ LockFile::do_acquire(const bool blocking)
   }
 }
 
-std::optional<util::TimePoint>
+std::optional<TimePoint>
 LockFile::get_last_lock_update()
 {
-  if (const auto stat = Stat::stat(m_alive_file); stat) {
-    return stat.mtime();
+  if (DirEntry entry(m_alive_file); entry) {
+    return entry.mtime();
   } else {
     return std::nullopt;
   }
@@ -352,12 +355,12 @@ void*
 LockFile::do_acquire(const bool blocking)
 {
   void* handle;
-  RandomNumberGenerator sleep_ms_generator(k_min_sleep_time * 1000,
-                                           k_max_sleep_time * 1000);
+  RandomNumberGenerator sleep_ms_generator(k_min_sleep_time_ms,
+                                           k_max_sleep_time_ms);
 
   while (true) {
     DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE;
-    handle = CreateFile(m_lock_file.c_str(),
+    handle = CreateFile(m_lock_file.string().c_str(),
                         GENERIC_WRITE, // desired access
                         0,             // shared mode (0 = not shared)
                         nullptr,       // security attributes
@@ -372,7 +375,7 @@ LockFile::do_acquire(const bool blocking)
     DWORD error = GetLastError();
     if (error == ERROR_PATH_NOT_FOUND) {
       // Directory doesn't exist?
-      if (Util::create_dir(Util::dir_name(m_lock_file))) {
+      if (fs::create_directories(m_lock_file.parent_path())) {
         // OK. Retry.
         continue;
       }
@@ -380,7 +383,7 @@ LockFile::do_acquire(const bool blocking)
 
     LOG("Could not acquire {}: {} ({})",
         m_lock_file,
-        Win32Util::error_message(error),
+        util::win32_error_message(error),
         error);
 
     // ERROR_SHARING_VIOLATION: lock already held.

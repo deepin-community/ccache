@@ -19,14 +19,17 @@
 #include "InodeCache.hpp"
 
 #include "Config.hpp"
-#include "Digest.hpp"
-#include "Finalizer.hpp"
 #include "Hash.hpp"
-#include "Logging.hpp"
-#include "Stat.hpp"
-#include "TemporaryFile.hpp"
 #include "Util.hpp"
-#include "fmtmacros.hpp"
+
+#include <util/DirEntry.hpp>
+#include <util/Fd.hpp>
+#include <util/Finalizer.hpp>
+#include <util/TemporaryFile.hpp>
+#include <util/conversion.hpp>
+#include <util/file.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
 
 #include <fcntl.h>
 #include <libgen.h>
@@ -44,6 +47,7 @@
 
 #include <atomic>
 #include <type_traits>
+#include <vector>
 
 // The inode cache resides on a file that is mapped into shared memory by
 // running processes. It is implemented as a two level structure, where the top
@@ -83,9 +87,9 @@ const uint64_t k_min_fs_mib_left = 100; // 100 MiB
 // How long a filesystem space check is valid before we make a new one.
 const util::Duration k_fs_space_check_valid_duration(1);
 
-static_assert(Digest::size() == 20,
+static_assert(std::tuple_size<Hash::Digest>() == 20,
               "Increment version number if size of digest is changed.");
-static_assert(std::is_trivially_copyable<Digest>::value,
+static_assert(std::is_trivially_copyable<Hash::Digest>::value,
               "Digest is expected to be trivially copyable.");
 
 static_assert(
@@ -207,9 +211,9 @@ struct InodeCache::Key
 
 struct InodeCache::Entry
 {
-  Digest key_digest;  // Hashed key
-  Digest file_digest; // Cached file hash
-  int return_value;   // Cached return value
+  Hash::Digest key_digest;  // Hashed key
+  Hash::Digest file_digest; // Cached file hash
+  int return_value;         // Cached return value
 };
 
 struct InodeCache::Bucket
@@ -234,7 +238,7 @@ InodeCache::mmap_file(const std::string& inode_cache_file)
     munmap(m_sr, sizeof(SharedRegion));
     m_sr = nullptr;
   }
-  m_fd = Fd(open(inode_cache_file.c_str(), O_RDWR));
+  m_fd = util::Fd(open(inode_cache_file.c_str(), O_RDWR));
   if (!m_fd) {
     LOG("Failed to open inode cache {}: {}", inode_cache_file, strerror(errno));
     return false;
@@ -275,17 +279,17 @@ InodeCache::mmap_file(const std::string& inode_cache_file)
 bool
 InodeCache::hash_inode(const std::string& path,
                        ContentType type,
-                       Digest& digest)
+                       Hash::Digest& digest)
 {
-  Stat stat = Stat::stat(path);
-  if (!stat) {
-    LOG("Could not stat {}: {}", path, strerror(stat.error_number()));
+  util::DirEntry de(path);
+  if (!de.exists()) {
+    LOG("Could not stat {}: {}", path, strerror(de.error_number()));
     return false;
   }
 
   // See comment for InodeCache::InodeCache why this check is done.
   auto now = util::TimePoint::now();
-  if (now - stat.ctime() < m_min_age || now - stat.mtime() < m_min_age) {
+  if (now - de.ctime() < m_min_age || now - de.mtime() < m_min_age) {
     LOG("Too new ctime or mtime of {}, not considering for inode cache", path);
     return false;
   }
@@ -293,25 +297,26 @@ InodeCache::hash_inode(const std::string& path,
   Key key;
   memset(&key, 0, sizeof(Key));
   key.type = type;
-  key.st_dev = stat.device();
-  key.st_ino = stat.inode();
-  key.st_mode = stat.mode();
-  key.st_mtim = stat.mtime().to_timespec();
-  key.st_ctim = stat.ctime().to_timespec();
-  key.st_size = stat.size();
+  key.st_dev = de.device();
+  key.st_ino = de.inode();
+  key.st_mode = de.mode();
+  key.st_mtim = de.mtime().to_timespec();
+  key.st_ctim = de.ctime().to_timespec();
+  key.st_size = de.size();
 
   Hash hash;
-  hash.hash(&key, sizeof(Key));
+  hash.hash(nonstd::span<const uint8_t>(reinterpret_cast<const uint8_t*>(&key),
+                                        sizeof(key)));
   digest = hash.digest();
   return true;
 }
 
 bool
-InodeCache::with_bucket(const Digest& key_digest,
+InodeCache::with_bucket(const Hash::Digest& key_digest,
                         const BucketHandler& bucket_handler)
 {
   uint32_t hash;
-  Util::big_endian_to_int(key_digest.bytes(), hash);
+  util::big_endian_to_int(key_digest.data(), hash);
   const uint32_t index = hash % k_num_buckets;
   Bucket* bucket = &m_sr->buckets[index];
   bool acquired_lock = spin_lock(bucket->owner_pid, m_self_pid);
@@ -341,16 +346,21 @@ InodeCache::create_new_file(const std::string& filename)
 {
   // Create the new file to a temporary name to prevent other processes from
   // mapping it before it is fully initialized.
-  TemporaryFile tmp_file(filename);
-
-  Finalizer temp_file_remover([&] { unlink(tmp_file.path.c_str()); });
-
-  if (!fd_is_on_known_to_work_file_system(*tmp_file.fd)) {
+  auto tmp_file = util::TemporaryFile::create(filename);
+  if (!tmp_file) {
+    LOG("Failed to created inode cache file: {}", tmp_file.error());
     return false;
   }
-  int err = Util::fallocate(*tmp_file.fd, sizeof(SharedRegion));
-  if (err != 0) {
-    LOG("Failed to allocate file space for inode cache: {}", strerror(err));
+
+  util::Finalizer temp_file_remover([&] { unlink(tmp_file->path.c_str()); });
+
+  if (!fd_is_on_known_to_work_file_system(*tmp_file->fd)) {
+    return false;
+  }
+
+  if (auto result = util::fallocate(*tmp_file->fd, sizeof(SharedRegion));
+      !result) {
+    LOG("Failed to allocate file space for inode cache: {}", result.error());
     return false;
   }
   SharedRegion* sr =
@@ -358,7 +368,7 @@ InodeCache::create_new_file(const std::string& filename)
                                          sizeof(SharedRegion),
                                          PROT_READ | PROT_WRITE,
                                          MAP_SHARED,
-                                         *tmp_file.fd,
+                                         *tmp_file->fd,
                                          0));
   if (sr == MMAP_FAILED) {
     LOG("Failed to mmap new inode cache: {}", strerror(errno));
@@ -373,14 +383,14 @@ InodeCache::create_new_file(const std::string& filename)
   }
 
   munmap(sr, sizeof(SharedRegion));
-  tmp_file.fd.close();
+  tmp_file->fd.close();
 
   // link() will fail silently if a file with the same name already exists.
   // This will be the case if two processes try to create a new file
   // simultaneously. Thus close the current file handle and reopen a new one,
   // which will make us use the first created file even if we didn't win the
   // race.
-  if (link(tmp_file.path.c_str(), filename.c_str()) != 0) {
+  if (link(tmp_file->path.c_str(), filename.c_str()) != 0) {
     LOG("Failed to link new inode cache: {}", strerror(errno));
     return false;
   }
@@ -406,7 +416,8 @@ InodeCache::initialize()
         LOG("fstatfs failed: {}", strerror(errno));
         return false;
       }
-      if (buf.f_bavail * 512 < k_min_fs_mib_left * 1024 * 1024) {
+      if (static_cast<uint64_t>(buf.f_bavail) * 512
+          < k_min_fs_mib_left * 1024 * 1024) {
         LOG("Filesystem has less than {} MiB free space, not using inode cache",
             k_min_fs_mib_left);
         return false;
@@ -465,19 +476,20 @@ InodeCache::available(int fd)
   return fd_is_on_known_to_work_file_system(fd);
 }
 
-std::optional<HashSourceCodeResult>
-InodeCache::get(const std::string& path, ContentType type, Digest& file_digest)
+std::optional<std::pair<HashSourceCodeResult, Hash::Digest>>
+InodeCache::get(const std::string& path, ContentType type)
 {
   if (!initialize()) {
     return std::nullopt;
   }
 
-  Digest key_digest;
+  Hash::Digest key_digest;
   if (!hash_inode(path, type, key_digest)) {
     return std::nullopt;
   }
 
   std::optional<HashSourceCodeResult> result;
+  Hash::Digest file_digest;
   const bool success = with_bucket(key_digest, [&](const auto bucket) {
     for (uint32_t i = 0; i < k_num_entries; ++i) {
       if (bucket->entries[i].key_digest == key_digest) {
@@ -506,20 +518,24 @@ InodeCache::get(const std::string& path, ContentType type, Digest& file_digest)
       ++m_sr->misses;
     }
   }
-  return result;
+  if (result) {
+    return std::make_pair(*result, file_digest);
+  } else {
+    return std::nullopt;
+  }
 }
 
 bool
 InodeCache::put(const std::string& path,
                 ContentType type,
-                const Digest& file_digest,
+                const Hash::Digest& file_digest,
                 HashSourceCodeResult return_value)
 {
   if (!initialize()) {
     return false;
   }
 
-  Digest key_digest;
+  Hash::Digest key_digest;
   if (!hash_inode(path, type, key_digest)) {
     return false;
   }

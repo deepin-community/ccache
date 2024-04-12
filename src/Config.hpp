@@ -18,9 +18,9 @@
 
 #pragma once
 
-#include "NonCopyable.hpp"
-
 #include <core/Sloppiness.hpp>
+#include <util/NonCopyable.hpp>
+#include <util/filesystem.hpp>
 #include <util/string.hpp>
 
 #include <sys/types.h>
@@ -46,7 +46,7 @@ enum class CompilerType {
 
 std::string compiler_type_to_string(CompilerType compiler_type);
 
-class Config : NonCopyable
+class Config : util::NonCopyable
 {
 public:
   Config() = default;
@@ -63,7 +63,8 @@ public:
   int8_t compression_level() const;
   const std::string& cpp_extension() const;
   bool debug() const;
-  const std::string& debug_dir() const;
+  const std::filesystem::path& debug_dir() const;
+  uint8_t debug_level() const;
   bool depend_mode() const;
   bool direct_mode() const;
   bool disable() const;
@@ -177,7 +178,8 @@ private:
   int8_t m_compression_level = 0; // Use default level
   std::string m_cpp_extension;
   bool m_debug = false;
-  std::string m_debug_dir;
+  std::filesystem::path m_debug_dir;
+  uint8_t m_debug_level = 2;
   bool m_depend_mode = false;
   bool m_direct_mode = true;
   bool m_disable = false;
@@ -218,7 +220,7 @@ private:
   std::unordered_map<std::string /*key*/, std::string /*origin*/> m_origins;
 
   void set_item(const std::string& key,
-                const std::string& value,
+                const std::string& unexpanded_value,
                 const std::optional<std::string>& env_var_key,
                 bool negate,
                 const std::string& origin);
@@ -299,10 +301,16 @@ Config::debug() const
   return m_debug;
 }
 
-inline const std::string&
+inline const std::filesystem::path&
 Config::debug_dir() const
 {
   return m_debug_dir;
+}
+
+inline uint8_t
+Config::debug_level() const
+{
+  return m_debug_level;
 }
 
 inline bool

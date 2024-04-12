@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -19,16 +19,10 @@
 #include "mainoptions.hpp"
 
 #include <Config.hpp>
-#include <Fd.hpp>
-#include <File.hpp>
 #include <Hash.hpp>
 #include <InodeCache.hpp>
-#include <Logging.hpp>
 #include <ProgressBar.hpp>
-#include <TemporaryFile.hpp>
-#include <ThreadPool.hpp>
-#include <UmaskScope.hpp>
-#include <assertions.hpp>
+#include <Util.hpp>
 #include <ccache.hpp>
 #include <core/CacheEntry.hpp>
 #include <core/FileRecompressor.hpp>
@@ -39,13 +33,21 @@
 #include <core/Statistics.hpp>
 #include <core/StatsLog.hpp>
 #include <core/exceptions.hpp>
-#include <fmtmacros.hpp>
 #include <storage/Storage.hpp>
 #include <storage/local/LocalStorage.hpp>
+#include <util/Fd.hpp>
+#include <util/FileStream.hpp>
+#include <util/TemporaryFile.hpp>
 #include <util/TextTable.hpp>
+#include <util/ThreadPool.hpp>
+#include <util/UmaskScope.hpp>
 #include <util/XXH3_128.hpp>
+#include <util/assertions.hpp>
+#include <util/environment.hpp>
 #include <util/expected.hpp>
 #include <util/file.hpp>
+#include <util/fmtmacros.hpp>
+#include <util/logging.hpp>
 #include <util/string.hpp>
 
 #include <fcntl.h>
@@ -55,6 +57,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -70,6 +73,8 @@ extern "C" {
 }
 #endif
 
+using util::DirEntry;
+
 namespace core {
 
 constexpr const char VERSION_TEXT[] =
@@ -77,7 +82,7 @@ constexpr const char VERSION_TEXT[] =
 Features: {2}
 
 Copyright (C) 2002-2007 Andrew Tridgell
-Copyright (C) 2009-2023 Joel Rosdahl and other contributors
+Copyright (C) 2009-2024 Joel Rosdahl and other contributors
 
 See <https://ccache.dev/credits.html> for a complete list of contributors.
 
@@ -179,27 +184,16 @@ configuration_printer(const std::string& key,
   PRINT(stdout, "({}) {} = {}\n", origin, key, value);
 }
 
-static nonstd::expected<std::vector<uint8_t>, std::string>
+static tl::expected<util::Bytes, std::string>
 read_from_path_or_stdin(const std::string& path)
 {
   if (path == "-") {
-    std::vector<uint8_t> output;
-    const auto result =
-      util::read_fd(STDIN_FILENO, [&](const uint8_t* data, size_t size) {
-        output.insert(output.end(), data, data + size);
-      });
-    if (!result) {
-      return nonstd::make_unexpected(
-        FMT("Failed to read from stdin: {}", result.error()));
-    }
-    return output;
+    return util::read_fd(STDIN_FILENO).transform_error([&](auto error) {
+      return FMT("Failed to read from stdin: {}", error);
+    });
   } else {
-    const auto result = util::read_file<std::vector<uint8_t>>(path);
-    if (!result) {
-      return nonstd::make_unexpected(
-        FMT("Failed to read {}: {}", path, result.error()));
-    }
-    return *result;
+    return util::read_file<util::Bytes>(path).transform_error(
+      [&](auto error) { return FMT("Failed to read {}: {}", path, error); });
   }
 }
 
@@ -241,7 +235,8 @@ print_compression_statistics(const Config& config,
                              const storage::local::CompressionStatistics& cs)
 {
   const double ratio = cs.actual_size > 0
-                         ? static_cast<double>(cs.content_size) / cs.actual_size
+                         ? static_cast<double>(cs.content_size)
+                             / static_cast<double>(cs.actual_size)
                          : 0.0;
   const double savings = ratio > 0.0 ? 100.0 - (100.0 / ratio) : 0.0;
 
@@ -305,26 +300,26 @@ trim_dir(const std::string& dir,
          std::optional<std::optional<int8_t>> recompress_level,
          uint32_t recompress_threads)
 {
-  std::vector<Stat> files;
+  std::vector<DirEntry> files;
   uint64_t initial_size = 0;
 
-  Util::traverse(dir, [&](const std::string& path, const bool is_dir) {
-    if (is_dir || TemporaryFile::is_tmp_file(path)) {
-      return;
-    }
-    auto stat = Stat::lstat(path);
-    if (!stat) {
-      // Probably some race, ignore.
-      return;
-    }
-    initial_size += stat.size_on_disk();
-    const auto name = Util::base_name(path);
-    if (name == "ccache.conf" || name == "stats") {
-      throw Fatal(
-        FMT("this looks like a local cache directory (found {})", path));
-    }
-    files.emplace_back(std::move(stat));
-  });
+  util::throw_on_error<core::Error>(
+    util::traverse_directory(dir, [&](const auto& de) {
+      if (de.is_directory() || util::TemporaryFile::is_tmp_file(de.path())) {
+        return;
+      }
+      if (!de) {
+        // Probably some race, ignore.
+        return;
+      }
+      initial_size += de.size_on_disk();
+      const auto name = de.path().filename();
+      if (name == "ccache.conf" || name == "stats") {
+        throw Fatal(
+          FMT("this looks like a local cache directory (found {})", de.path()));
+      }
+      files.emplace_back(de);
+    }));
 
   std::sort(files.begin(), files.end(), [&](const auto& f1, const auto& f2) {
     return trim_lru_mtime ? f1.mtime() < f2.mtime() : f1.atime() < f2.atime();
@@ -335,7 +330,7 @@ trim_dir(const std::string& dir,
   if (recompress_level) {
     const size_t read_ahead = std::max(
       static_cast<size_t>(10), 2 * static_cast<size_t>(recompress_threads));
-    ThreadPool thread_pool(recompress_threads, read_ahead);
+    util::ThreadPool thread_pool(recompress_threads, read_ahead);
     core::FileRecompressor recompressor;
 
     std::atomic<uint64_t> incompressible_size = 0;
@@ -372,7 +367,7 @@ trim_dir(const std::string& dir,
       if (final_size <= trim_max_size) {
         break;
       }
-      if (Util::unlink_tmp(file.path())) {
+      if (util::remove(file.path().string())) {
         ++removed_files;
         final_size -= file.size_on_disk();
       }
@@ -503,16 +498,17 @@ process_main_options(int argc, const char* const* argv)
 
     switch (c) {
     case 'd': // --dir
-      Util::setenv("CCACHE_DIR", arg);
+      util::setenv("CCACHE_DIR", arg);
       break;
 
     case CONFIG_PATH:
-      Util::setenv("CCACHE_CONFIGPATH", arg);
+      util::setenv("CCACHE_CONFIGPATH", arg);
       break;
 
     case RECOMPRESS_THREADS:
-      recompress_threads = util::value_or_throw<Error>(util::parse_unsigned(
-        arg, 1, std::numeric_limits<uint32_t>::max(), "threads"));
+      recompress_threads =
+        static_cast<uint32_t>(util::value_or_throw<Error>(util::parse_unsigned(
+          arg, 1, std::numeric_limits<uint32_t>::max(), "threads")));
       break;
 
     case TRIM_MAX_SIZE: {
@@ -533,8 +529,8 @@ process_main_options(int argc, const char* const* argv)
 
     case TRIM_RECOMPRESS_THREADS:
       trim_recompress_threads =
-        util::value_or_throw<Error>(util::parse_unsigned(
-          arg, 1, std::numeric_limits<uint32_t>::max(), "threads"));
+        static_cast<uint32_t>(util::value_or_throw<Error>(util::parse_unsigned(
+          arg, 1, std::numeric_limits<uint32_t>::max(), "threads")));
       break;
 
     case 'v': // --verbose
@@ -556,9 +552,9 @@ process_main_options(int argc, const char* const* argv)
          != -1) {
     Config config;
     config.read();
-    Logging::init(config);
+    util::logging::init(config.debug(), config.log_file());
 
-    UmaskScope umask_scope(config.umask());
+    util::UmaskScope umask_scope(config.umask());
 
     const std::string arg = optarg ? optarg : std::string();
 
@@ -576,14 +572,11 @@ process_main_options(int argc, const char* const* argv)
 
     case CHECKSUM_FILE: {
       util::XXH3_128 checksum;
-      Fd fd(arg == "-" ? STDIN_FILENO : open(arg.c_str(), O_RDONLY));
+      util::Fd fd(arg == "-" ? STDIN_FILENO : open(arg.c_str(), O_RDONLY));
       if (fd) {
-        util::read_fd(*fd, [&checksum](const uint8_t* data, size_t size) {
-          checksum.update({data, size});
-        });
+        util::read_fd(*fd, [&checksum](auto data) { checksum.update(data); });
         const auto digest = checksum.digest();
-        PRINT(
-          stdout, "{}\n", Util::format_base16(digest.data(), digest.size()));
+        PRINT(stdout, "{}\n", util::format_base16(digest));
       } else {
         PRINT(stderr, "Error: Failed to checksum {}\n", arg);
       }
@@ -596,7 +589,7 @@ process_main_options(int argc, const char* const* argv)
     }
 
     case EVICT_OLDER_THAN: {
-      evict_max_age = Util::parse_duration(arg);
+      evict_max_age = util::value_or_throw<Error>(util::parse_duration(arg));
       break;
     }
 
@@ -629,7 +622,7 @@ process_main_options(int argc, const char* const* argv)
       const auto result =
         arg == "-" ? hash.hash_fd(STDIN_FILENO) : hash.hash_file(arg);
       if (result) {
-        PRINT(stdout, "{}\n", hash.digest().to_string());
+        PRINT(stdout, "{}\n", util::format_digest(hash.digest()));
       } else {
         PRINT(stderr, "Error: Failed to hash {}: {}\n", arg, result.error());
         return EXIT_FAILURE;
@@ -646,7 +639,8 @@ process_main_options(int argc, const char* const* argv)
       const auto [counters, last_updated] =
         storage::local::LocalStorage(config).get_all_statistics();
       Statistics statistics(counters);
-      PRINT_RAW(stdout, statistics.format_machine_readable(last_updated));
+      PRINT_RAW(stdout,
+                statistics.format_machine_readable(config, last_updated));
       break;
     }
 
@@ -729,7 +723,7 @@ process_main_options(int argc, const char* const* argv)
       }
       Statistics statistics(StatsLog(config.stats_log()).read());
       const auto timestamp =
-        Stat::stat(config.stats_log(), Stat::OnError::log).mtime();
+        DirEntry(config.stats_log(), DirEntry::LogOnError::yes).mtime();
       PRINT_RAW(
         stdout,
         statistics.format_human_readable(config, timestamp, verbosity, true));

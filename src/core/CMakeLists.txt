@@ -1,5 +1,6 @@
 set(
   sources
+  AtomicFile.cpp
   CacheEntry.cpp
   FileRecompressor.cpp
   Manifest.cpp
@@ -11,6 +12,7 @@ set(
   Statistics.cpp
   StatisticsCounters.cpp
   StatsLog.cpp
+  common.cpp
   mainoptions.cpp
   types.cpp
 )

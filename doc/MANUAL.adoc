@@ -306,6 +306,8 @@ Another case where `--ccache-skip` can be useful is if ccache interprets an
 option specially but shouldn't, since the option has another meaning for your
 compiler than what ccache thinks.
 
+See also <<config_ignore_options,*ignore_options*>>.
+
 
 == Configuration
 
@@ -369,6 +371,15 @@ See also the <<config_cache_dir,*cache_dir*>> configuration option for how the
 cache directory location is determined.
 
 
+=== Configuration value syntax
+
+All configuration values support expansion of environment variables. The syntax
+is similar to POSIX shell syntax: `$VAR` or `${VAR}`. Both variants will expand
+to the value of the environment variable `VAR`.
+
+Two consecutive dollar signs (`$$`) will expand to a single dollar sign (`$`).
+
+
 === Configuration file syntax
 
 Configuration files are in a simple "`key = value`" format, one option per
@@ -379,7 +390,6 @@ is whitespace surrounding keys and values. Example:
 # Set maximum cache size to 10 GB:
 max_size = 10G
 -------------------------------------------------------------------------------
-
 
 === Boolean values
 
@@ -427,7 +437,7 @@ option key.
 A typical path to use as *base_dir* is your home directory or another directory
 that is a parent of your project directories. Don't use `/` as the base
 directory since that will make ccache also rewrite paths to system header
-files, which typically is contraproductive.
+files, which typically is counterproductive.
 +
 For example, say that Alice's current working directory is
 `/home/alice/project1/build` and that she compiles like this:
@@ -454,7 +464,7 @@ gcc -I/usr/include/example -I/home/alice/project2/include -c ../src/example.c
 If Bob has put `project1` and `project2` in `/home/bob/stuff` and both users
 have set *base_dir* to `/home` or `/home/$USER`, then Bob will get a cache hit
 (if they share ccache directory) since the actual command line will be
-identical to that of Alice:
+identical to Alice's command line:
 +
 -------------------------------------------------------------------------------
 # Current working directory: /home/bob/stuff/project1/build
@@ -671,6 +681,13 @@ is `/home/user` and the object file is `build/output.o` then the debug log will
 be written to `/example/home/user/build/output.o.ccache-log`. See also
 _<<Cache debugging>>_.
 
+[#config_debug_level]
+*debug_level* (*CCACHE_DEBUGLEVEL*)::
+
+    Specifies the amount of information that is written when the
+    <<config_debug,debug mode>> is enabled. See _<<Cache debugging>>_ for more
+    information. The default is 2.
+
 [#config_depend_mode]
 *depend_mode* (*CCACHE_DEPEND* or *CCACHE_NODEPEND*, see _<<Boolean values>>_ above)::
 
@@ -780,12 +797,13 @@ might be incorrect.
 *ignore_options* (*CCACHE_IGNOREOPTIONS*)::
 
     This option is a space-delimited list of compiler options that ccache will
-    exclude from the hash. Excluding a compiler option from the hash can be
-    useful when you know it doesn't affect the result (but ccache doesn't know
-    that), or when it does and you don't care. If a compiler option in the list
-    is suffixed with an asterisk (`*`) it will be matched as a prefix. For
-    example, `+-fmessage-length=*+` will match both `-fmessage-length=20` and
-    `-fmessage-length=70`.
+    ignore. Entries in the list can optionally end with an asterisk (`*`) to
+    matching any option suffix. For example, `+-fmessage-length=*+` will match
+    both `-fmessage-length=20` and `-fmessage-length=70`. A matching compiler
+    option will neither be interpreted specially nor be part of the input hash.
+    Ignoring a compiler option from the hash can be useful when you know it
+    doesn't affect the result (and ccache doesn't know that), or when it does
+    and you don't care. See also _<<Extra options>>_.
 
 [#config_inode_cache]
 *inode_cache* (*CCACHE_INODECACHE* or *CCACHE_NOINODECACHE*, see _<<Boolean values>>_ above)::
@@ -1009,13 +1027,15 @@ preprocessing first.
     directory in the `.gcno` file. *gcno_cwd* also disables hashing of the
     current working directory if `-fprofile-abs-path` is used.
 *include_file_ctime*::
-    By default, ccache will disable the direct mode if an include file has too
-    new ctime. This sloppiness disables that check. See also _<<Handling of
-    newly created header files>>_.
+    By default, ccache will disable caching if a source code file has a status
+    change time (ctime) after the start of the ccache invocation. This
+    sloppiness disables that check. See also _<<Handling of newly created source
+    files>>_.
 *include_file_mtime*::
-    By default, ccache will disable the direct mode if an include file has too
-    new mtime. This sloppiness disables that check. See also _<<Handling of
-    newly created header files>>_.
+    By default, ccache will disable caching if a source code file has a
+    modification time (mtime) after the start of the ccache invocation. This
+    sloppiness disables that check. See also _<<Handling of newly created source
+    files>>_.
 *ivfsoverlay*::
     Ignore the Clang compiler option `-ivfsoverlay` and its argument. This is
     useful if you use Xcode, which uses a virtual file system (VFS) for things
@@ -1038,9 +1058,16 @@ preprocessing first.
     hash. This is useful if your build system generates different seeds between
     builds and you are OK with reusing cached results.
 *system_headers*::
-    By default, ccache will also include all system headers in the manifest.
-    With this sloppiness set, ccache will only include system headers in the
-    hash but not add the system header files to the list of include files.
+    Only check non-system headers in direct mode.
+    This can be useful if e.g. your system headers tend to change but you know that
+    the changes don't matter. Notes:
++
+* This sloppiness is only supported for GCC-like compilers, not MSVC.
+* System headers are still taken into account for preprocessed lookup.
+* You can get stale cache hits if the system headers do change in incompatible
+  ways.
+* See also the
+  <<config_ignore_headers_in_manifest,*ignore_headers_in_manifest*>> setting.
 *time_macros*::
     Ignore `+__DATE__+`, `+__TIME__+` and `+__TIMESTAMP__+` being present in the
     source code.
@@ -1404,6 +1431,9 @@ Preconditions for using <<C++ modules>> were not fulfilled.
 Preconditions for using <<Precompiled headers,precompiled headers>> were not
 fulfilled.
 
+| Could not read or parse input file |
+An input file could not be read or parsed (see the debug log for details).
+
 | Could not write to output file |
 The output path specified with `-o` could not be written to.
 
@@ -1431,6 +1461,9 @@ Failure reading a file specified by
 
 | Forced recache |
 <<config_recache,*CCACHE_RECACHE*>> was used to overwrite an existing result.
+
+| Input file modified during compilation |
+An input file was modified during compilation.
 
 | Internal error |
 Unexpected failure, e.g. due to problems reading/writing the cache.
@@ -1606,31 +1639,23 @@ The depend mode will be disabled if any of the following holds:
   `/showIncludes` is added automatically if not specified by the user).
 
 
-== Handling of newly created header files
+== Handling of newly created source files
 
-If modification time (mtime) or status change time (ctime) of one of the include
-files is equal to (or newer than) the time compilation is being done, ccache
-disables the direct mode (or, in the case of a <<Precompiled headers,precompiled
-header>>, disables caching completely). This done as a safety measure to avoid a
-race condition (see below).
-
-To be able to use a newly created header files in direct mode (or use a newly
-precompiled header), either:
-
-* create the include file earlier in the build process, or
-* set <<config_sloppiness,*sloppiness*>> to
-  *include_file_ctime,include_file_mtime* if you are willing to take the risk,
-  for instance if you know that your build system is robust enough not to
-  trigger the race condition.
+If modification time (mtime) or status change time (ctime) of the source file or
+one of the include files is equal to (or newer than) the time that ccache was
+invoked, ccache disables caching completely. This is done as a safety measure to
+avoid a race condition (see below). In practice, this is only a problem when
+using file systems with very low timestamp granularity. You can set
+<<config_sloppiness,*sloppiness*>> to *include_file_ctime,include_file_mtime* to
+opt out of the safety measure.
 
 For reference, the race condition mentioned above consists of these events:
 
-1. The preprocessor is run.
-2. An include file is modified by someone.
-3. The new include file is hashed by ccache.
-4. The real compiler is run on the preprocessor's output, which contains data
-   from the old header file.
-5. The wrong object file is stored in the cache.
+1. A source code file is read by ccache and added to the input hash.
+2. The source code file is modified.
+3. The compiler is executed and reads the modified source code.
+4. Ccache stores the compiler output in the cache associated with the incorrect
+   key (based on the unmodified source code).
 
 
 == Cache debugging
@@ -1643,29 +1668,33 @@ why you don't get cache hits. Note that performance will be reduced slightly.
 When the debug mode is enabled, ccache will create up to five additional files
 next to the object file:
 
-[options="header",cols="30%,70%"]
+[options="header",cols="30%,10%,60%"]
 |==============================================================================
-| *Filename* | *Description*
+| *Filename* | *Debug level* | *Description*
 
-| `<objectfile>.<timestamp>.ccache-input-c` |
+| `<objectfile>.<timestamp>.ccache-input-c` | 2 |
 Binary input hashed by both the direct mode and the preprocessor mode.
 
-| `<objectfile>.<timestamp>.ccache-input-d` |
+| `<objectfile>.<timestamp>.ccache-input-d` | 2 |
 Binary input only hashed by the direct mode.
 
-| `<objectfile>.<timestamp>.ccache-input-p` |
+| `<objectfile>.<timestamp>.ccache-input-p` | 2 |
 Binary input only hashed by the preprocessor mode.
 
-| `<objectfile>.<timestamp>.ccache-input-text` |
+| `<objectfile>.<timestamp>.ccache-input-text` | 2 |
 Human-readable combined diffable text version of the three files above.
 
-| `<objectfile>.<timestamp>.ccache-log` |
+| `<objectfile>.<timestamp>.ccache-log` | 1 |
 Log for this object file.
 
 |==============================================================================
 
- The timestamp format is
+The timestamp format is
 `<year><month><day>_<hour><minute><second>_<microsecond>`.
+
+
+If you only need the log file, set <<config_debug,*debug_level*>> (environment
+variable `CCACHE_DEBUGLEVEL`) to 1.
 
 If <<config_debug_dir,*debug_dir*>> (environment variable `CCACHE_DEBUGDIR`) is
 set, the files above will be written to that directory with full absolute paths
@@ -1738,7 +1767,7 @@ to do some things to make it work properly:
   works in combination with precompiled headers.
 * You may also want to include *include_file_mtime,include_file_ctime* in
   <<config_sloppiness,*sloppiness*>>. See
-  _<<Handling of newly created header files>>_.
+  _<<Handling of newly created source files>>_.
 * You must either:
 +
 --
@@ -1903,9 +1932,8 @@ problems and what may be done to increase the hit rate:
    `-Wp,-MMD,<path>`, and `-Wp,-D<define>`) is used.
 ** This was the first compilation with a new value of the
    <<config_base_dir,base directory>>.
-** A modification or status change time of one of the include files is too new
-   (created the same second as the compilation is being done). See
-   _<<Handling of newly created header files>>_.
+** A modification or status change time of one of the include files is too new .
+   See _<<Handling of newly created source files>>_.
 ** The `+__TIME__+` preprocessor macro is (potentially) being used. Ccache turns
    off direct mode if `+__TIME__+` is present in the source code. This is done
    as a safety measure since the string indicates that a `+__TIME__+` macro

@@ -18,14 +18,14 @@
 
 #include "../src/Config.hpp"
 #include "../src/Util.hpp"
-#include "../src/fmtmacros.hpp"
 #include "TestUtil.hpp"
 
 #include <core/exceptions.hpp>
+#include <util/environment.hpp>
 #include <util/file.hpp>
+#include <util/fmtmacros.hpp>
 
 #include "third_party/doctest.h"
-#include "third_party/fmt/core.h"
 
 #include <limits>
 #include <string>
@@ -50,6 +50,7 @@ TEST_CASE("Config: default values")
   CHECK(config.cpp_extension().empty());
   CHECK(!config.debug());
   CHECK(config.debug_dir().empty());
+  CHECK(config.debug_level() == 2);
   CHECK(!config.depend_mode());
   CHECK(config.direct_mode());
   CHECK(!config.disable());
@@ -87,7 +88,7 @@ TEST_CASE("Config::update_from_file")
   TestContext test_context;
 
   const char user[] = "rabbit";
-  Util::setenv("USER", user);
+  util::setenv("USER", user);
 
 #ifndef _WIN32
   std::string base_dir = FMT("/{0}/foo/{0}", user);
@@ -109,6 +110,8 @@ TEST_CASE("Config::update_from_file")
     "compression=false\n"
     "compression_level= 2\n"
     "cpp_extension = .foo\n"
+    "debug_dir = $USER$/${USER}/.ccache_debug\n"
+    "debug_level = 2\n"
     "depend_mode = true\n"
     "direct_mode = false\n"
     "disable = true\n"
@@ -150,6 +153,8 @@ TEST_CASE("Config::update_from_file")
   CHECK_FALSE(config.compression());
   CHECK(config.compression_level() == 2);
   CHECK(config.cpp_extension() == ".foo");
+  CHECK(config.debug_dir() == FMT("{0}$/{0}/.ccache_debug", user));
+  CHECK(config.debug_level() == 2);
   CHECK(config.depend_mode());
   CHECK_FALSE(config.direct_mode());
   CHECK(config.disable());
@@ -287,13 +292,13 @@ TEST_CASE("Config::update_from_environment")
 {
   Config config;
 
-  Util::setenv("CCACHE_COMPRESS", "1");
+  util::setenv("CCACHE_COMPRESS", "1");
   config.update_from_environment();
   CHECK(config.compression());
 
-  Util::unsetenv("CCACHE_COMPRESS");
+  util::unsetenv("CCACHE_COMPRESS");
 
-  Util::setenv("CCACHE_NOCOMPRESS", "1");
+  util::setenv("CCACHE_NOCOMPRESS", "1");
   config.update_from_environment();
   CHECK(!config.compression());
 }
@@ -393,6 +398,7 @@ TEST_CASE("Config::visit_items")
     "cpp_extension = ce\n"
     "debug = false\n"
     "debug_dir = /dd\n"
+    "debug_level = 2\n"
     "depend_mode = true\n"
     "direct_mode = false\n"
     "disable = true\n"
@@ -454,6 +460,7 @@ TEST_CASE("Config::visit_items")
     "(test.conf) cpp_extension = ce",
     "(test.conf) debug = false",
     "(test.conf) debug_dir = /dd",
+    "(test.conf) debug_level = 2",
     "(test.conf) depend_mode = true",
     "(test.conf) direct_mode = false",
     "(test.conf) disable = true",

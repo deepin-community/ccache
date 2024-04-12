@@ -5,19 +5,15 @@ Source: https://github.com/ccache/ccache/releases
 
 Files: *
 Copyright: 2002-2007 Andrew Tridgell <tridge@samba.org>
-           2009-2022 Joel Rosdahl <joel@rosdahl.net>
+           2009-2024 Joel Rosdahl <joel@rosdahl.net>
 License: GPL-3+
 
 Files: debian/*
 Copyright: 2002-2003 Paul Russell <prussell@debian.org>
            2004-2009 Francois Marier <francois@debian.org>
            2009-2010 Y Giridhar Appaji Nag <appaji@debian.org>
-           2010-2022 Joel Rosdahl <joel@debian.org>
+           2010-2024 Joel Rosdahl <joel@debian.org>
 License: GPL-3+
-
-Files: src/third_party/base32hex.*
-Copyright: 2012 Peter Conrad <conrad@quisquis.de>
-License: GPL-3
 
 Files: src/third_party/blake3/*
 Copyright: 2019-2020 Samuel Neves and Jack O'Connor
@@ -32,7 +28,7 @@ Copyright: 2012-2022 Victor Zverovich
 License: Expat
 
 Files: src/third_party/format.cpp
-Copyright: 2012-2022 Victor Zverovich
+Copyright: 2012-2023 Victor Zverovich
 License: Expat
 
 Files: src/third_party/getopt_long.*
@@ -41,16 +37,16 @@ Copyright: 1987-1994 The Regents of the University of California
 License: BSD-3-clause
 
 Files: src/third_party/httplib.*
-Copyright: 2022 yhirose
+Copyright: 2023 yhirose
 License: Expat
 
 Files: src/third_party/minitrace.*
 Copyright: 2014 Henrik Rydgård
 License: Expat
 
-Files: src/third_party/nonstd/expected.hpp
-Copyright: 2016-2020 Martin Moene
-License: Boost
+Files: src/third_party/tl/expected.hpp
+Copyright: 2017 Sy Brand
+License: CC0-1.0
 
 Files: src/third_party/nonstd/span.hpp
 Copyright: 2018-2021 Martin Moene
@@ -74,7 +70,7 @@ Copyright: None specified
 License: Python
 
 Files: src/third_party/xxh*
-Copyright: 2012-2020 Yann Collet
+Copyright: 2012-2021 Yann Collet
 License: BSD-2-clause
 
 License: Apache
@@ -355,22 +351,6 @@ License: Expat
 License: LGPL-3
  On Debian systems, the full text of the GNU Lesser General Public License
  version 3 can be found in the file "/usr/share/common-licenses/LGPL-3".
-
-License: GPL-3
- This program is free software: you can redistribute it and/or modify it under
- the terms of the GNU General Public License version 3 as published by the Free
- Software Foundation.
- .
- This program is distributed in the hope that it will be useful, but WITHOUT ANY
- WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- PARTICULAR PURPOSE. See the GNU General Public License for more details.
- .
- You should have received a copy of the GNU General Public License along with
- this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
- Street, Fifth Floor, Boston, MA 02110-1301 USA
- .
- On Debian systems, the full text of the GNU General Public License version 3
- can be found in the file "/usr/share/common-licenses/GPL-3".
 
 License: GPL-3+
  This program is free software; you can redistribute it and/or modify it under

@@ -1,3 +1,18 @@
+ccache (4.9.1-1) unstable; urgency=medium
+
+  * New upstream release 4.9.1 (closes: #1062810)
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 05 Feb 2024 21:15:10 +0100
+
+ccache (4.9-1) unstable; urgency=medium
+
+  * Remove debian/ccache.triggers on clean (closes: #1060243)
+  * New upstream release 4.9
+  * Update debian/copyright
+  * Bump Standards-Version to 4.6.2 with no changes
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 15 Jan 2024 21:39:08 +0100
+
 ccache (4.8.3-1) unstable; urgency=medium
 
   * New upstream release 4.8.3
