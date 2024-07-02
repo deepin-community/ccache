@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -16,31 +16,43 @@
 // this program; if not, write to the Free Software Foundation, Inc., 51
 // Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-#include "../src/Config.hpp"
-#include "../src/Context.hpp"
-#include "../src/Hash.hpp"
-#include "../src/InodeCache.hpp"
 #include "TestUtil.hpp"
 
-#include <util/Fd.hpp>
-#include <util/file.hpp>
-#include <util/path.hpp>
+#include <ccache/Config.hpp>
+#include <ccache/Context.hpp>
+#include <ccache/Hash.hpp>
+#include <ccache/InodeCache.hpp>
+#include <ccache/util/Fd.hpp>
+#include <ccache/util/PathString.hpp>
+#include <ccache/util/TemporaryFile.hpp>
+#include <ccache/util/file.hpp>
+#include <ccache/util/filesystem.hpp>
+#include <ccache/util/path.hpp>
 
-#include "third_party/doctest.h"
+#include <doctest/doctest.h>
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
+namespace fs = util::filesystem;
+
 using TestUtil::TestContext;
+using pstr = util::PathString;
 
 namespace {
 
 bool
 inode_cache_available()
 {
-  util::Fd fd(open(util::actual_cwd().c_str(), O_RDONLY));
-  return fd && InodeCache::available(*fd);
+  auto tmp_file =
+    util::TemporaryFile::create((*fs::current_path()) / "fs_test");
+  if (!tmp_file) {
+    return false;
+  }
+  bool available = tmp_file->fd && InodeCache::available(*tmp_file->fd);
+  fs::remove(tmp_file->path);
+  return available;
 }
 
 void
@@ -48,7 +60,7 @@ init(Config& config)
 {
   config.set_debug(true);
   config.set_inode_cache(true);
-  config.set_temporary_dir(util::actual_cwd());
+  config.set_temporary_dir(pstr(*fs::current_path()).str());
 }
 
 bool

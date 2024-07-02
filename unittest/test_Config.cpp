@@ -1,4 +1,4 @@
-// Copyright (C) 2011-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2011-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -16,16 +16,15 @@
 // this program; if not, write to the Free Software Foundation, Inc., 51
 // Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-#include "../src/Config.hpp"
-#include "../src/Util.hpp"
 #include "TestUtil.hpp"
 
-#include <core/exceptions.hpp>
-#include <util/environment.hpp>
-#include <util/file.hpp>
-#include <util/fmtmacros.hpp>
+#include <ccache/Config.hpp>
+#include <ccache/core/exceptions.hpp>
+#include <ccache/util/environment.hpp>
+#include <ccache/util/file.hpp>
+#include <ccache/util/format.hpp>
 
-#include "third_party/doctest.h"
+#include <doctest/doctest.h>
 
 #include <limits>
 #include <string>
@@ -60,7 +59,11 @@ TEST_CASE("Config: default values")
   CHECK(config.hash_dir());
   CHECK(config.ignore_headers_in_manifest().empty());
   CHECK(config.ignore_options().empty());
+#ifndef _WIN32
   CHECK(config.inode_cache());
+#else
+  CHECK_FALSE(config.inode_cache());
+#endif
   CHECK_FALSE(config.keep_comments_cpp());
   CHECK(config.log_file().empty());
   CHECK(config.max_files() == 0);
@@ -121,6 +124,7 @@ TEST_CASE("Config::update_from_file")
     "hash_dir = false\n"
     "ignore_headers_in_manifest = a:b/c\n"
     "ignore_options = -a=* -b\n"
+    "inode_cache = false\n"
     "keep_comments_cpp = true\n"
     "log_file = $USER${USER} \n"
     "max_files = 17\n"
@@ -164,6 +168,7 @@ TEST_CASE("Config::update_from_file")
   CHECK_FALSE(config.hash_dir());
   CHECK(config.ignore_headers_in_manifest() == "a:b/c");
   CHECK(config.ignore_options() == "-a=* -b");
+  CHECK_FALSE(config.inode_cache());
   CHECK(config.keep_comments_cpp());
   CHECK(config.log_file() == FMT("{0}{0}", user));
   CHECK(config.max_files() == 17);
@@ -387,7 +392,7 @@ TEST_CASE("Config::visit_items")
 #ifndef _WIN32
     "base_dir = /bd\n"
 #else
-    "base_dir = C:/bd\n"
+    "base_dir = C:\\bd\n"
 #endif
     "cache_dir = cd\n"
     "compiler = c\n"
@@ -449,7 +454,7 @@ TEST_CASE("Config::visit_items")
 #ifndef _WIN32
     "(test.conf) base_dir = /bd",
 #else
-    "(test.conf) base_dir = C:/bd",
+    "(test.conf) base_dir = C:\\bd",
 #endif
     "(test.conf) cache_dir = cd",
     "(test.conf) compiler = c",
