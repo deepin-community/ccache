@@ -159,8 +159,8 @@ documentation.
 
 *-o* _KEY=VALUE_, *--set-config* _KEY_=_VALUE_::
 
-    Set configuration option _KEY_ to _VALUE_. See _<<Configuration>>_ for more
-    information.
+    Set configuration option _KEY_ to _VALUE_ in the configuration file. See
+    _<<Configuration>>_ for more information.
 
 *-x*, *--show-compression*::
 
@@ -258,6 +258,18 @@ directory to a certain size, use `CCACHE_MAXSIZE=_SIZE_ ccache -c`.
     working directory. This option is only useful when debugging ccache and its
     behavior.
 
+*--format* _FORMAT_::
+
+    Specify format for `--print-log-stats` and `--print-stats`. Possible values
+    are:
++
+--
+*tab*::
+    Tab separated. This is the default.
+*json*::
+    JSON formatted.
+--
+
 *-k* _KEY_, *--get-config* _KEY_::
 
     Print the value of configuration option _KEY_. See _<<Configuration>>_ for
@@ -276,10 +288,20 @@ directory to a certain size, use `CCACHE_MAXSIZE=_SIZE_ ccache -c`.
     the file content. This option is only useful when debugging ccache and its
     behavior.
 
+*--print-log-stats*::
+
+    Print statistics counters from the stats log in machine-parsable
+    (tab-separated or JSON) format. See <<config_stats_log,*stats_log*>> and
+    `--format`.
+
 *--print-stats*::
 
     Print statistics counter IDs and corresponding values in machine-parsable
-    (tab-separated) format.
+    (tab-separated or JSON) format. See `--format`.
+
+*--print-version*::
+
+    Print version and don't do anything else.
 
 
 
@@ -814,7 +836,8 @@ might be incorrect.
     requires <<config_temporary_dir,*temporary_dir*>> to be located on a local
     filesystem of a supported type.
 +
-NOTE: The inode cache feature is currently not available on Windows.
+NOTE: Support for the inode cache feature on Windows is experimental. On Windows
+the default is false.
 
 [#config_keep_comments_cpp]
 *keep_comments_cpp* (*CCACHE_COMMENTS* or *CCACHE_NOCOMMENTS*, see _<<Boolean values>>_ above)::
@@ -1019,13 +1042,22 @@ preprocessing first.
     backdating files' mtimes in a controlled way.
 *gcno_cwd*::
     By default, ccache will include the current working directory in the hash
-    when producing a `.gcno` file (when compiling with `-ftest-coverage` or
-    `--coverage`). This is because GCC 9+ includes the current working directory
-    in the `.gcno` file. The *gcno_cwd* sloppiness makes ccache not hash the
-    current working directory so that you can get cache hits when compiling in
-    different directories, with the tradeoff of potentially getting an incorrect
-    directory in the `.gcno` file. *gcno_cwd* also disables hashing of the
-    current working directory if `-fprofile-abs-path` is used.
+    when producing a `.gcno` file (when compiling with `-ftest-coverage`). This
+    is because GCC 9+ includes the current working directory in the `.gcno`
+    file. The *gcno_cwd* sloppiness makes ccache not hash the current working
+    directory so that you can get cache hits when compiling in different
+    directories, with the tradeoff of potentially getting an incorrect directory
+    in the `.gcno` file. *gcno_cwd* also disables hashing of the current working
+    directory if `-fprofile-abs-path` is used.
++
+NOTE: `gcno_cwd` sloppiness will not have any effect when compiling with
+`--coverage` since that implies `-fprofile-arcs` which always forces CWD to be
+included in the input hash.
+*incbin*::
+    By default, ccache will ignore all files containing an `.incbin` directive.
+    While this is the correct behaviour as ccache does not detect incbin changes,
+    this restriction can make some projects difficult to cache. This sloppiness
+    will pretend the `.incbin` directive doesn't exist and simply allow caching.
 *include_file_ctime*::
     By default, ccache will disable caching if a source code file has a status
     change time (ctime) after the start of the ccache invocation. This
@@ -1597,10 +1629,10 @@ The direct mode will be disabled if any of the following holds:
 * <<config_direct_mode,*direct_mode*>> is false
 * a modification time of one of the include files is too new (needed to avoid a
   race condition)
-* a compiler option not supported by the direct mode is used:
+* a compiler option not supported by the direct mode is used, for example:
 ** a `-Wp,++*++` compiler option other than `-Wp,-MD,<path>`, `-Wp,-MMD,<path>`,
    `-Wp,-D<macro[=defn]>` or `-Wp,-U<macro>`
-** `-Xpreprocessor`
+** most uses of `-Xpreprocessor`
 * the string `+__TIME__+` is present in the source code
 
 

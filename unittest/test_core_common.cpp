@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,11 +18,16 @@
 
 #include "TestUtil.hpp"
 
-#include <core/common.hpp>
-#include <util/DirEntry.hpp>
-#include <util/file.hpp>
+#include <ccache/core/common.hpp>
+#include <ccache/core/exceptions.hpp>
+#include <ccache/util/DirEntry.hpp>
+#include <ccache/util/file.hpp>
+#include <ccache/util/filesystem.hpp>
+#include <ccache/util/format.hpp>
 
-#include <third_party/doctest.h>
+#include <doctest/doctest.h>
+
+namespace fs = util::filesystem;
 
 using TestUtil::TestContext;
 using util::DirEntry;
@@ -39,9 +44,32 @@ TEST_CASE("core::ensure_dir_exists")
   CHECK(DirEntry("create/dir").is_directory());
 
   util::write_file("create/dir/file", "");
-  CHECK_THROWS_WITH(
-    core::ensure_dir_exists("create/dir/file"),
-    doctest::Contains("Failed to create directory create/dir/file:"));
+  CHECK_THROWS_AS(core::ensure_dir_exists("create/dir/file"), core::Fatal);
+}
+
+TEST_CASE("core::rewrite_stderr_to_absolute_paths")
+{
+  TestContext test_context;
+  util::write_file("existing", "");
+
+  std::string input =
+    "a:1:2\n"
+    "existing:3:4\n"
+    "c:5:6\n"
+    "\x1b[01m\x1b[Kexisting:\x1b[m\x1b[K: foo\n"
+    "\x1b[01m\x1b[Kexisting:47:11:\x1b[m\x1b[K: foo\n"
+    "In file included from \x1b[01m\x1b[Kexisting:\x1b[m\x1b[K: foo\n"
+    "In file included from \x1b[01m\x1b[Kexisting:47:11:\x1b[m\x1b[K: foo\n";
+  std::string expected = FMT(
+    "a:1:2\n"
+    "{0}:3:4\n"
+    "c:5:6\n"
+    "\x1b[01m\x1b[K{0}:\x1b[m\x1b[K: foo\n"
+    "\x1b[01m\x1b[K{0}:47:11:\x1b[m\x1b[K: foo\n"
+    "In file included from \x1b[01m\x1b[K{0}:\x1b[m\x1b[K: foo\n"
+    "In file included from \x1b[01m\x1b[K{0}:47:11:\x1b[m\x1b[K: foo\n",
+    *fs::canonical("existing"));
+  CHECK(core::rewrite_stderr_to_absolute_paths(input) == expected);
 }
 
 TEST_CASE("core::strip_ansi_csi_seqs")

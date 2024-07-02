@@ -15,63 +15,42 @@ Copyright: 2002-2003 Paul Russell <prussell@debian.org>
            2010-2024 Joel Rosdahl <joel@debian.org>
 License: GPL-3+
 
-Files: src/third_party/blake3/*
+Files: src/third_party/blake3/blake3/*
 Copyright: 2019-2020 Samuel Neves and Jack O'Connor
 License: CC0-1.0 or Apache
 
-Files: src/third_party/doctest.h
-Copyright: 2016-2021 Viktor Kirilov
+Files: src/third_party/cpp-httplib/httplib.h
+Copyright: 2024 yhirose
 License: Expat
 
-Files: src/third_party/fmt/*.h
-Copyright: 2012-2022 Victor Zverovich
-License: Expat
-
-Files: src/third_party/format.cpp
-Copyright: 2012-2023 Victor Zverovich
-License: Expat
-
-Files: src/third_party/getopt_long.*
-Copyright: 1987-1994 The Regents of the University of California
-           2003 PostgreSQL Global Development Group
-License: BSD-3-clause
-
-Files: src/third_party/httplib.*
-Copyright: 2023 yhirose
-License: Expat
-
-Files: src/third_party/minitrace.*
-Copyright: 2014 Henrik Rydgård
-License: Expat
-
-Files: src/third_party/tl/expected.hpp
-Copyright: 2017 Sy Brand
-License: CC0-1.0
-
-Files: src/third_party/nonstd/span.hpp
-Copyright: 2018-2021 Martin Moene
-License: Boost
-
-Files: src/third_party/url.*
+Files: src/third_party/cxxurl/cxxurl/*
 Copyright: 2015 Christophe Meessen
 License: Expat
 
-Files: src/third_party/win32/getopt.*
+Files: src/third_party/fmt/fmt/*
+Copyright: 2012-2024 Victor Zverovich
+License: Expat
+
+Files: src/third_party/nonstd-span/nonstd/*
+Copyright: 2018-2021 Martin Moene
+License: Boost
+
+Files: src/third_party/tl-expected/tl/*
+Copyright: 2017 Sy Brand
+License: CC0-1.0
+
+Files: src/third_party/win32-compat/win32/getopt.*
 Copyright: 2011 Ludvik Jerabek
 License: LGPL-3
 
-Files: src/third_party/win32/mktemp.*
+Files: src/third_party/win32-compat/win32/mktemp.*
 Copyright: 1996-2008 Theo de Raadt
            1997-2009 Todd C. Miller
 License: ISC
 
-Files: src/third_party/win32/winerror_to_errno.h
+Files: src/third_party/win32-compat/win32/winerror_to_errno.h
 Copyright: None specified
 License: Python
-
-Files: src/third_party/xxh*
-Copyright: 2012-2021 Yann Collet
-License: BSD-2-clause
 
 License: Apache
                                  Apache License
@@ -271,52 +250,6 @@ License: Boost
  FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
-
-License: BSD-2-clause
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions are met:
- .
- 1. Redistributions of source code must retain the above copyright notice, this
-    list of conditions and the following disclaimer.
- 2. Redistributions in binary form must reproduce the above copyright notice,
-    this list of conditions and the following disclaimer in the documentation
-    and/or other materials provided with the distribution.
- .
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
- FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-License: BSD-3-clause
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions
- are met:
- .
- 1. Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
- 3. Neither the name of the University nor the names of its contributors
-    may be used to endorse or promote products derived from this software
-    without specific prior written permission.
- .
- THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS "AS IS" AND ANY
- EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR ANY
- DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 License: CC0-1.0
  To the extent possible under law, the author(s) have dedicated all copyright

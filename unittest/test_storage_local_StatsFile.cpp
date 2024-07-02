@@ -1,4 +1,4 @@
-// Copyright (C) 2011-2022 Joel Rosdahl and other contributors
+// Copyright (C) 2011-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,13 +18,12 @@
 
 #include "TestUtil.hpp"
 
-#include <Util.hpp>
-#include <core/Statistic.hpp>
-#include <storage/local/StatsFile.hpp>
-#include <util/file.hpp>
-#include <util/fmtmacros.hpp>
+#include <ccache/core/Statistic.hpp>
+#include <ccache/storage/local/StatsFile.hpp>
+#include <ccache/util/file.hpp>
+#include <ccache/util/format.hpp>
 
-#include <third_party/doctest.h>
+#include <doctest/doctest.h>
 
 using core::Statistic;
 using storage::local::StatsFile;

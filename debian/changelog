@@ -1,3 +1,12 @@
+ccache (4.10.1-1) unstable; urgency=medium
+
+  * New upstream release 4.10.1
+  * Update copyright for new version
+  * Update build dependencies and rules for new version
+  * Update to Standards-Version 4.7.0 with no changes
+
+ -- Joel Rosdahl <joel@debian.org>  Mon, 01 Jul 2024 09:00:23 +0200
+
 ccache (4.9.1-1) unstable; urgency=medium
 
   * New upstream release 4.9.1 (closes: #1062810)

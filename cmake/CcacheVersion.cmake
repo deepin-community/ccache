@@ -22,7 +22,7 @@
 # CCACHE_VERSION_ORIGIN is set to "archive" in scenario 1 and "git" in scenario
 # 3.
 
-set(version_info "ec510e9b0f333b8e97aee98108de3e0858340d59 HEAD, tag: v4.9.1, origin/HEAD, origin/4.9-maint, 4.9-maint")
+set(version_info "4c6181f7f93f8dad8106973aaf55475cddfd2730 HEAD, tag: v4.10.1, origin/HEAD, origin/4.10-maint, 4.10-maint")
 set(CCACHE_VERSION "unknown")
 
 if(version_info MATCHES "^([0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])[0-9a-f]* (.*)")

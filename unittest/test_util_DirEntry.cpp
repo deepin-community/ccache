@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,14 +18,17 @@
 
 #include "TestUtil.hpp"
 
-#include <util/DirEntry.hpp>
-#include <util/Finalizer.hpp>
-#include <util/environment.hpp>
-#include <util/file.hpp>
-#include <util/filesystem.hpp>
-#include <util/wincompat.hpp>
+#include <ccache/util/DirEntry.hpp>
+#include <ccache/util/Fd.hpp>
+#include <ccache/util/Finalizer.hpp>
+#include <ccache/util/environment.hpp>
+#include <ccache/util/file.hpp>
+#include <ccache/util/filesystem.hpp>
+#include <ccache/util/wincompat.hpp>
 
-#include <third_party/doctest.h>
+#include <doctest/doctest.h>
+
+#include <fcntl.h>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -201,6 +204,23 @@ TEST_CASE("Construction for missing entry")
 #endif
 }
 
+#ifndef _WIN32
+TEST_CASE("Stat file descriptor")
+{
+  TestContext test_context;
+
+  util::write_file("a", "123");
+
+  util::Fd fd(open("a", O_RDONLY));
+  DirEntry entry("a", *fd);
+  CHECK(entry);
+  CHECK(entry.exists());
+  CHECK(!entry.is_symlink());
+  CHECK(entry.size() == 3);
+  CHECK(entry.path() == "a");
+}
+#endif
+
 TEST_CASE("Caching and refresh")
 {
   TestContext test_context;
@@ -210,7 +230,7 @@ TEST_CASE("Caching and refresh")
   DirEntry entry("a");
   CHECK(entry.size() == 0);
 
-  util::write_file("a", "123", util::InPlace::yes);
+  util::write_file("a", "123", util::WriteFileMode::in_place);
   CHECK(entry.size() == 0);
   entry.refresh();
   CHECK(entry.size() == 3);
@@ -228,7 +248,7 @@ TEST_CASE("Same i-node as")
   CHECK(entry_a.same_inode_as(entry_a));
   CHECK(!entry_a.same_inode_as(entry_b));
 
-  util::write_file("a", "change size", util::InPlace::yes);
+  util::write_file("a", "change size", util::WriteFileMode::in_place);
   CHECK(DirEntry("a").same_inode_as(entry_a));
 
   CHECK(!DirEntry("nonexistent").same_inode_as(DirEntry("nonexistent")));
@@ -441,7 +461,7 @@ TEST_CASE("Hard links")
   CHECK(entry_a.inode() == entry_b.inode());
   CHECK(entry_a.same_inode_as(entry_b));
 
-  util::write_file("a", "1234567", util::InPlace::yes);
+  util::write_file("a", "1234567", util::WriteFileMode::in_place);
   entry_b.refresh();
   CHECK(entry_b.size() == 7);
 }
@@ -665,6 +685,6 @@ TEST_CASE(
   CHECK(!(entry.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT));
   CHECK(entry.reparse_tag() == 0);
 }
-#endif
+#endif // _WIN32
 
 TEST_SUITE_END();

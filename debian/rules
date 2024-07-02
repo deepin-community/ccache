@@ -10,6 +10,11 @@ override_dh_auto_clean:
 	dh_auto_clean
 	$(RM) debian/ccache.triggers
 
+override_dh_auto_configure:
+	dh_auto_configure -- \
+	  -D DEPS=LOCAL \
+	  -D DEP_CPPHTTPLIB=BUNDLED
+
 override_dh_install:
 	dh_install
 	sed s/%DEB_HOST_MULTIARCH%/$(DEB_HOST_MULTIARCH)/ debian/update-ccache-symlinks.in >debian/ccache/usr/sbin/update-ccache-symlinks
