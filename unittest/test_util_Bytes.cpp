@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -16,10 +16,10 @@
 // this program; if not, write to the Free Software Foundation, Inc., 51
 // Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-#include <util/Bytes.hpp>
+#include <ccache/util/Bytes.hpp>
 
-#include <third_party/doctest.h>
-#include <third_party/nonstd/span.hpp>
+#include <doctest/doctest.h>
+#include <nonstd/span.hpp>
 
 #include <vector>
 
@@ -85,7 +85,9 @@ TEST_CASE("Basics")
 
   SUBCASE("Move construction")
   {
-    const auto bytes1_orig_data = bytes1.data();
+    // cppcheck-suppress constVariablePointer; we're intentionally keeping a
+    // copy of the pointer
+    const uint8_t* bytes1_orig_data = bytes1.data();
     Bytes bytes2(std::move(bytes1));
 
     CHECK(bytes1.data() == nullptr);
@@ -120,7 +122,9 @@ TEST_CASE("Basics")
 
   SUBCASE("Move assignment")
   {
-    const auto bytes1_orig_data = bytes1.data();
+    // cppcheck-suppress constVariablePointer; we're intentionally keeping a
+    // copy of the pointer
+    const uint8_t* bytes1_orig_data = bytes1.data();
     Bytes bytes2;
     bytes2 = std::move(bytes1);
 
@@ -144,7 +148,7 @@ TEST_CASE("Basics")
   SUBCASE("Non-const operator[]")
   {
     bytes1[1] = 'x';
-    CHECK(bytes1[1] == 'x');
+    CHECK(bytes1[1] == 'x'); // cppcheck-suppress knownConditionTrueFalse
   }
 
   SUBCASE("Comparison")
@@ -197,7 +201,9 @@ TEST_CASE("Basics")
 
   SUBCASE("Reserve and capacity")
   {
-    const auto bytes1_orig_data = bytes1.data();
+    // cppcheck-suppress constVariablePointer; we're intentionally keeping a
+    // copy of the pointer
+    const uint8_t* bytes1_orig_data = bytes1.data();
     CHECK(bytes1.size() == 3);
     CHECK(bytes1.capacity() == 3);
 
@@ -214,7 +220,9 @@ TEST_CASE("Basics")
 
   SUBCASE("Increase size")
   {
-    const auto bytes1_orig_data = bytes1.data();
+    // cppcheck-suppress constVariablePointer; we're intentionally keeping a
+    // copy of the pointer
+    const uint8_t* bytes1_orig_data = bytes1.data();
     bytes1.resize(4);
     CHECK(bytes1.data() != bytes1_orig_data);
     CHECK(bytes1.size() == 4);
@@ -226,7 +234,9 @@ TEST_CASE("Basics")
 
   SUBCASE("Decrease size")
   {
-    const auto bytes1_orig_data = bytes1.data();
+    // cppcheck-suppress constVariablePointer; we're intentionally keeping a
+    // copy of the pointer
+    const uint8_t* bytes1_orig_data = bytes1.data();
     bytes1.resize(2);
     CHECK(bytes1.data() == bytes1_orig_data);
     CHECK(bytes1.size() == 2);
@@ -363,6 +373,19 @@ TEST_CASE("Basics")
     std::string data("abc");
 
     bytes2.insert(bytes2.end(), data.data(), data.size());
+    CHECK(bytes2.size() == 3);
+    CHECK(bytes2.capacity() == 3);
+    CHECK(bytes2[0] == 'a');
+    CHECK(bytes2[1] == 'b');
+    CHECK(bytes2[2] == 'c');
+  }
+
+  SUBCASE("Insert span")
+  {
+    Bytes bytes2;
+    nonstd::span<const uint8_t> span(bytes1.begin(), bytes1.end());
+
+    bytes2.insert(bytes2.end(), span);
     CHECK(bytes2.size() == 3);
     CHECK(bytes2.capacity() == 3);
     CHECK(bytes2[0] == 'a');
